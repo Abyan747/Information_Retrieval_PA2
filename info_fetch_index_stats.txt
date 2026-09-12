@@ -1,0 +1,6 @@
+Documents indexed : 1400
+Unique terms      : 4188
+Total postings    : 77782
+Total tokens      : 132167
+Indexing time (s) : 2.973
+Index size (KB)   : 1057.8
