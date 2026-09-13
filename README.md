@@ -11,7 +11,7 @@
 * **Team Members:**
   * **Sumit Mukherjee** — `23EC3AI17` (M.Tech, E&ECE)
   * **Abyan Hussain** — `23EC3AI19` (M.Tech, E&ECE)
-  * **Kinnar Halder** — `23IE35001` (Dual Degree, Industrial & Systems)
+  * **Kinnar Halder** — `23IE35001` (Dual Degree, Instrumentation Enginnering)
   * **Avik Ghosh** — `23EC10099` (B.Tech, E&ECE)
 
 ---
