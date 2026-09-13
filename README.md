@@ -34,7 +34,7 @@ The repository is organized across four retrieval paradigms:
 3. **Part III — Advanced Probabilistic & DFR Models (Report Comparison):**
    * Two-dimensional parameter sweep over BM25 ($b \in [0.3, 1.0]$, $k_1 \in [1.0, 2.0]$).
    * Divergence from Randomness (DFR) sweep on `In_expB2` ($c \in [0.1, 2.0]$), `PL2`, `BB2`, `DPH`, and `DFRee`.
-   * Best-of-both linear score interpolation hybrid: $\alpha \cdot \text{BM25}^* + (1 - \alpha) \cdot \text{In\_expB2}^*$.
+   * Best-of-both linear score interpolation hybrid: $\alpha \cdot \text{BM25}^* + (1 - \alpha) \cdot \text{InExpB2}^*$.
    * **Peak Model:** `In_expB2_c0.7` ($\text{MAP} = \mathbf{0.3312}$).
 4. **Part IV — Query Expansion on Advanced Models & Expanded Ensembles:**
    * PRF applied to the tuned BM25 and In_expB2 models.
