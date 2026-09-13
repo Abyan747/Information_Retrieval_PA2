@@ -7,7 +7,7 @@
 ## 1. Group Details
 
 * **Group Name:** Info fetch
-* **Repository:** `https://github.com/sumitmukherjee7/info-fetch-assignment-2`
+* **Repository:** `https://github.com/Abyan747/Information_Retrieval_PA2`
 * **Team Members:**
   * **Sumit Mukherjee** — `23EC3AI17` (Dual Degree, E&ECE)
   * **Abyan Hussain** — `23EC3AI19` (Dual Degree, E&ECE)
