@@ -62,6 +62,12 @@ def main():
     print("Info fetch -- PA2 Indexer (Modern PyTerrier)")
     print("=" * 60)
 
+    # Auto-run preprocessor if processed corpus does not exist
+    if not os.path.exists(PROCESSED_FILE):
+        print(f"\nProcessed corpus '{PROCESSED_FILE}' not found. Running preprocessor...")
+        import info_fetch_preprocess
+        info_fetch_preprocess.main()
+
     # Remove old index if exists
     if os.path.exists(INDEX_DIR):
         print(f"\nRemoving existing index at '{INDEX_DIR}' ...")

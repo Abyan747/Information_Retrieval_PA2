@@ -68,6 +68,10 @@ def main():
     print("=" * 60)
 
     print(f"\nLoading index from '{INDEX_DIR}' ...")
+    if not os.path.exists(INDEX_DIR) or not os.listdir(INDEX_DIR):
+        print(f"  Index not found at '{INDEX_DIR}'. Building index automatically...")
+        import info_fetch_index
+        info_fetch_index.main()
     index = pt.IndexFactory.of(os.path.abspath(INDEX_DIR))
 
     print(f"Loading queries from '{PROCESSED_QRY_FILE}' ...")

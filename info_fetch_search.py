@@ -38,31 +38,39 @@ if not pt.java.started():
 
 def parse_processed_queries(filepath: str) -> pd.DataFrame:
     """
-    Parse processed queries file into a PyTerrier topics DataFrame.
-    Supports two formats:
-      1. Cranfield SGML format (.I <qid> followed by .W <stems>)
-      2. Line-by-line format (<qid> <query_text> or tab-separated)
-    Returns DataFrame with columns: qid (str), query (str).
+    Parse queries file into a PyTerrier topics DataFrame.
+    Supports:
+      1. Cranfield SGML format (single-line '.W <stems>' or multi-line '.W\\n<text>')
+      2. Line-by-line format ('<qid> <query_text>' or plain query lines)
+    Applies preprocessing/stemming if unstemmed text is detected and stopwords.txt exists.
     """
     rows = []
     qid = None
+    in_w = False
+    current_tokens = []
 
-    with open(filepath, encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8", errors="replace") as f:
         lines = f.readlines()
 
-    # Check format
     is_sgml = any(l.startswith(".I ") for l in lines[:20])
 
     if is_sgml:
         for line in lines:
             line = line.rstrip("\r\n")
             if line.startswith(".I "):
+                if qid is not None and current_tokens:
+                    rows.append({"qid": qid, "query": " ".join(current_tokens).strip()})
                 qid = str(len(rows) + 1)
+                in_w = False
+                current_tokens = []
             elif line.startswith(".W ") and qid is not None:
-                query = line[3:].strip()
-                if query:
-                    rows.append({"qid": qid, "query": query})
-                qid = None
+                current_tokens.append(line[3:].strip())
+            elif line == ".W":
+                in_w = True
+            elif in_w and qid is not None:
+                current_tokens.append(line.strip())
+        if qid is not None and current_tokens:
+            rows.append({"qid": qid, "query": " ".join(current_tokens).strip()})
     else:
         for idx, line in enumerate(lines, start=1):
             line = line.strip()
@@ -73,6 +81,19 @@ def parse_processed_queries(filepath: str) -> pd.DataFrame:
                 rows.append({"qid": str(int(parts[0])), "query": parts[1].strip()})
             else:
                 rows.append({"qid": str(idx), "query": line})
+
+    # Ensure queries match indexed vocabulary (stemmed + stopwords removed)
+    stopwords_file = "stopwords.txt"
+    if os.path.exists(stopwords_file):
+        try:
+            from info_fetch_utils import load_stopwords, preprocess
+            stopwords = load_stopwords(stopwords_file)
+            for row in rows:
+                processed_tokens = preprocess(row["query"], stopwords)
+                if processed_tokens:
+                    row["query"] = " ".join(processed_tokens)
+        except Exception:
+            pass
 
     return pd.DataFrame(rows, columns=["qid", "query"])
 
@@ -183,6 +204,10 @@ def main():
     print("=" * 60)
 
     print(f"\nLoading index from '{INDEX_DIR}' ...")
+    if not os.path.exists(INDEX_DIR) or not os.listdir(INDEX_DIR):
+        print(f"  Index not found at '{INDEX_DIR}'. Building index automatically...")
+        import info_fetch_index
+        info_fetch_index.main()
     index = pt.IndexFactory.of(os.path.abspath(INDEX_DIR))
     stats = index.getCollectionStatistics()
     print(f"  Index loaded: {stats.getNumberOfDocuments()} docs, {stats.getNumberOfUniqueTerms()} terms")
