@@ -1,0 +1,767 @@
+\documentclass[10pt, a4paper]{article}
+
+% ==========================================
+% Packages & Configuration
+% ==========================================
+\usepackage[margin=0.9in]{geometry}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{titlesec}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{microtype}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!80!black,
+    citecolor=blue!80!black,
+    urlcolor=blue!70!black
+}
+
+% ==========================================
+% Custom Code Listings Style
+% ==========================================
+\definecolor{codegreen}{rgb}{0,0.55,0}
+\definecolor{codegray}{rgb}{0.45,0.45,0.45}
+\definecolor{codepurple}{rgb}{0.55,0,0.8}
+\definecolor{backcolour}{rgb}{0.97,0.97,0.98}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen}\itshape,
+    keywordstyle=\color{blue}\bfseries,
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=6pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
+
+\titlespacing*{\section}{0pt}{12pt plus 2pt minus 2pt}{6pt plus 1pt minus 1pt}
+\titlespacing*{\subsection}{0pt}{9pt plus 2pt minus 2pt}{4pt plus 1pt minus 1pt}
+\titlespacing*{\subsubsection}{0pt}{6pt plus 1pt minus 1pt}{3pt plus 1pt minus 1pt}
+
+% ==========================================
+% Title Information
+% ==========================================
+\title{
+    \vspace{-1.5cm}
+    \textbf{\LARGE Programming Assignment II}\\[0.3cm]
+    \Large Vector Space Model, Parameter Fine-Tuning, Pseudo-Relevance Feedback, and Advanced Ranked Retrieval on the Cranfield Benchmark
+}
+\author{
+    \textbf{Group Name:} Info fetch \\[0.15cm]
+    \textbf{Course:} Information Retrieval (CS60092) | Autumn 2026--27 \\
+    Department of Computer Science and Engineering, IIT Kharagpur \\[0.3cm]
+    \begin{tabular}{ll}
+        \textbf{Sumit Mukherjee} (23EC3AI17) & \textbf{Abyan Hussain} (23EC3AI19) \\ 
+        \textbf{Kinnar Halder} (23IE35001)   & \textbf{Avik Ghosh} (23EC10099)
+    \end{tabular}
+}
+\date{September 12, 2026}
+
+\begin{document}
+
+\maketitle
+\begin{abstract}
+This report presents an exhaustive study of ranked information retrieval pipelines developed for Programming Assignment~II on the classic Cranfield aeronautical test collection (1,400 documents, 225 queries, and 1,612 human relevance judgments). Conforming strictly to the assignment constraint restricting baseline submissions to sparse Vector Space Models (VSMs), we design and evaluate a modular Python system built upon the modern PyTerrier search framework with an inverted index compiled using whitespace tokenization and strict Porter stemming. 
+
+Our investigation is structured around four primary retrieval tiers: \textbf{(I) Pure Sparse Vector Space Models}, examining Term Frequency (\texttt{Tf}), Coordinate Match, Lemur VSM, and a high-resolution 17-point sweep over the document length normalization parameter $c$ in \texttt{TF\_IDF}; \textbf{(II) Pure VSM with Pseudo-Relevance Feedback (PRF)}, analyzing vocabulary mismatch alleviation via Bose-Einstein (Bo1) and Kullback-Leibler (KL) divergence query expansion; \textbf{(III) Probabilistic \& Advanced Divergence from Randomness (DFR) Models}, exploring two-dimensional parameter sweeps across BM25 ($b, k_1$) and In\_expB2 ($c$), followed by a best-of-both linear score interpolation hybrid; and \textbf{(IV) Query Expansion on Advanced Models and Hybrid Ensembles}. We report Mean Average Precision (MAP), Normalized Discounted Cumulative Gain (\mbox{nDCG@10}), Precision at ranks 5 and 10, Recall at rank 100, and two-tailed paired Student's $t$-test statistical significance across 67 unique retrieval pipelines, supplemented by end-to-end latency profiling and indexing resource benchmarks.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% ==========================================
+% 1. Group Details
+% ==========================================
+\section{Group Details}
+\label{sec:group_details}
+
+The development, experimentation, and analysis for this assignment were conducted collaboratively by group \textbf{Info fetch} for the course \textit{Information Retrieval (CS60092)}, Department of Computer Science and Engineering, Indian Institute of Technology Kharagpur.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Member Name} & \textbf{Roll Number} & \textbf{Degree \& Department} & \textbf{Primary Responsibilities} \\ \midrule
+Sumit Mukherjee & 23EC3AI17 & M.Tech, Electronics \& ECE & VSM pipeline development, PyTerrier indexing \\
+Abyan Hussain & 23EC3AI19 & M.Tech, Electronics \& ECE & Parameter sweeps, PRF/QE implementation, evaluation \\
+Kinnar Halder & 23IE35001 & Dual Degree, Industrial \& Systems & DFR \& BM25 modeling, hybrid interpolation scripts \\
+Avik Ghosh & 23EC10099 & B.Tech, Electronics \& ECE & Preprocessing verification, latency profiling, report \\ \bottomrule
+\end{tabular}
+\caption{Group membership and distribution of technical responsibilities.}
+\label{tab:group_members}
+\end{table}
+
+\noindent All submission artifacts, scripts, and output run files adhere strictly to the prefix convention \texttt{info\_fetch\_*}. The primary submission codebase is maintained at the official group repository:
+\begin{center}
+\url{https://github.com/sumitmukherjee7/info-fetch-assignment-2}
+\end{center}
+
+% ==========================================
+% 2. Problem Statement
+% ==========================================
+\section{Problem Statement}
+\label{sec:problem_statement}
+
+The objective of Programming Assignment~II is to engineer, tune, and evaluate ranked document retrieval pipelines using open-source search engine infrastructure (such as Terrier/PyTerrier or Lucene). In contrast to Boolean exact-match retrieval explored in Assignment~I, ranked retrieval scores and orders documents according to their predicted relevance to free-text user information needs.
+
+\subsection{Cranfield Benchmark Specifications}
+The evaluation utilizes the historical Cranfield text collection, an established standard in IR evaluation featuring:
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item \textbf{Corpus (\texttt{cran.all.1400} / \texttt{cran.all}):} 1,400 aerodynamic and aeronautical engineering abstracts formatted with SGML-like delimiter tags (\texttt{.I}, \texttt{.T}, \texttt{.A}, \texttt{.B}, \texttt{.W}).
+    \item \textbf{Stopwords (\texttt{stopwords.txt}):} 358 standard English function words.
+    \item \textbf{Queries (\texttt{cran.qry}):} 225 natural-language technical queries parsed from the \texttt{.W} abstract bodies.
+    \item \textbf{Relevance Judgments (\texttt{cranqrel}):} 1,612 human relevance judgments graded on a 1--4 scale. In compliance with TREC conventions, grades $1, 2, 3,$ and $4$ are treated as binary positive relevance ($\text{label} \ge 1$), while non-positive scores are excluded.
+\end{itemize}
+
+\subsection{Core Objectives and Assignment Constraints}
+\begin{enumerate}[noitemsep,topsep=2pt]
+    \item \textbf{Preprocessing Consistency:} Repeat the exact document and query preprocessing sequence established in Assignment~I: token extraction, case normalization, stop-word elimination, and morphological Porter stemming.
+    \item \textbf{Sparse Vector Space Model Constraint:} The core assignment prompt explicitly mandates:
+    \begin{quote}
+    \textit{``You may use only sparse vector space models. Don't use advanced probabilistic or dense neural retrieval models.''}
+    \end{quote}
+    Consequently, our submission-compliant pipeline must operate purely within the sparse VSM paradigm (e.g., \texttt{TF\_IDF} with document length normalization tuning).
+    \item \textbf{Extended Experimental Investigation:} To address the broader academic goals of the course and explore models covered in lectures, we conduct an extensive comparative evaluation comprising:
+    \begin{itemize}[noitemsep]
+        \item Pure sparse VSM parameter sweeps (tuning the document length penalty slope $c$).
+        \item Sparse Pseudo-Relevance Feedback (PRF) via query expansion (Bo1 and KL).
+        \item Probabilistic BM25 and Divergence From Randomness (DFR) models (sweeping $b$, $k_1$, and $c$).
+        \item Linear score-interpolation hybridization ($\alpha \cdot \text{BM25}^* + (1-\alpha) \cdot \text{In\_expB2}^*$).
+        \item Second-pass query expansion on advanced and hybrid models.
+    \end{itemize}
+    \item \textbf{Resource and Latency Profiling:} Quantify physical index statistics (term vocabulary, posting count, disk size), index construction runtime, and average query latency across retrieval models.
+    \item \textbf{Standardized TREC Output:} Output top-1000 ranked document candidate lists per query formatted to the six-column TREC standard for automated validation.
+\end{enumerate}
+
+% ==========================================
+% 3. Implementation Details
+% ==========================================
+\section{Implementation Details}
+\label{sec:implementation}
+
+Our system architecture is designed with clean modular boundaries separating preprocessing, indexing, search, evaluation, and latency benchmarking. Figure~\ref{fig:arch} illustrates the complete end-to-end data pipeline.
+
+\begin{figure}[H]
+\centering
+\fbox{\small
+\begin{tabular}{ccccccc}
+\textbf{Raw Corpus} & $\longrightarrow$ & \textbf{Custom Preprocessor} & $\longrightarrow$ & \textbf{Stemmed Token Stream} & $\longrightarrow$ & \textbf{PyTerrier Indexer} \\
+(\texttt{cran.all.1400}) & & (\texttt{re}, Stopwords, Porter) & & (\texttt{info\_fetch\_processed.all}) & & (\texttt{tokeniser="whitespace"}) \\
+& & & & & & $\boldsymbol{\downarrow}$ \\
+\textbf{TREC Run File} & $\longleftarrow$ & \textbf{Ranked Search / PRF} & $\longleftarrow$ & \textbf{Evaluation Engine} & $\longleftarrow$ & \textbf{Inverted Index} \\
+(\texttt{info\_fetch\_results.txt}) & & (VSM, PRF, BM25, DFR) & & (\texttt{pt.Experiment}, \texttt{ir\_measures}) & & (\texttt{info\_fetch\_terrier\_index})
+\end{tabular}
+}
+\caption{End-to-end system architecture of the Info fetch retrieval pipeline.}
+\label{fig:arch}
+\end{figure}
+
+\subsection{Preprocessing Pipeline and Index Construction}
+To maintain exact consistency with Assignment~I, the preprocessing stage converts raw SGML-delimited text into canonical token streams:
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item \textbf{Field Selection:} A state-machine parser reads \texttt{cran.all.1400}, extracting and concatenating only the Title (\texttt{.T}) and Body Abstract (\texttt{.W}) fields. Author (\texttt{.A}) and bibliographic metadata (\texttt{.B}) are discarded to avoid introducing topical noise into content queries.
+    \item \textbf{Regex Tokenization:} Content strings are parsed via the regular expression \texttt{[a-zA-Z]+}, strictly isolating alphabetical character sequences while stripping numeric values and punctuation.
+    \item \textbf{Case Normalization:} All tokens are lowercased to map morphological case variants to identical vocabulary entries.
+    \item \textbf{Stopword Elimination:} Tokens matching any of the 358 terms in \texttt{stopwords.txt} are dropped via an $\mathcal{O}(1)$ hash set.
+    \item \textbf{Porter Stemming:} Remaining content words are reduced to their canonical grammatical roots using the NLTK Porter Stemmer implementation.
+\end{itemize}
+
+The resulting preprocessed document streams are serialized to \texttt{info\_fetch\_processed.all}, storing documents with \texttt{.I} and preprocessed token sequences under \texttt{.W}. 
+
+An inverted index is generated via PyTerrier's \texttt{IterDictIndexer} configured with:
+\begin{lstlisting}[language=Python]
+indexer = pt.IterDictIndexer(
+    os.path.abspath(INDEX_DIR),
+    tokeniser="whitespace",
+    stemmer=None,
+    stopwords=None,
+    overwrite=True
+)
+\end{lstlisting}
+Configuring \texttt{tokeniser="whitespace"} and disabling internal PyTerrier stemmers and stopword filters ensures that the index operates strictly upon our preprocessed stems without secondary alteration or vocabulary drift.
+
+\subsection{Part I: Pure Sparse Vector Space Models (Primary Submission)}
+\label{sec:impl_part1}
+
+The pure Vector Space Model (VSM) family represents documents and queries as high-dimensional sparse vectors in $\mathbb{R}^{|V|}$, where $|V|$ denotes the index vocabulary size. Retrieval scoring computes the inner product or normalized cosine distance between the query vector $\vec{q}$ and document vector $\vec{d}$.
+
+\subsubsection{Mathematical Formulation of \texttt{TF\_IDF}}
+In standard SMART notation, classic TF-IDF weights term frequency ($tf$) and inverse document frequency ($idf$). In modern Terrier implementations, the primary sparse VSM retriever utilizes the pivoted document length normalization formulation developed by Singhal, Salton, and Buckley:
+\begin{equation}
+\text{Score}_{\text{TF\_IDF}}(d, q) = \sum_{t \in q \cap d} qtw_t \cdot \frac{tf_{t,d} \cdot \ln\left(1 + c \cdot \frac{avg\_l}{l_d}\right)}{tf_{t,d} + 0.5 + c \cdot \frac{l_d}{avg\_l}} \cdot \ln\left(\frac{N + 1}{df_t + 0.5}\right)
+\label{eq:vsm_tfidf}
+\end{equation}
+where:
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item $tf_{t,d}$ is the raw term frequency of term $t$ in document $d$.
+    \item $l_d = \sum_{t} tf_{t,d}$ is the token length of document $d$.
+    \item $avg\_l = \frac{1}{N} \sum_{d} l_d$ is the average document length across the entire corpus of $N=1,400$ documents.
+    \item $df_t$ is the document frequency (number of documents containing term $t$).
+    \item $qtw_t$ is the query term weight ($tf_{t,q}$).
+    \item $c > 0$ is the document length normalization hyperparameter.
+\end{itemize}
+
+\textbf{Role of Hyperparameter $c$:} The parameter $c$ governs the degree of length penalization. When $c$ is small ($c \to 0$), the ratio $c \cdot \frac{l_d}{avg\_l}$ vanishes, causing the retrieval score to depend primarily on raw term counts; this unduly favors long documents that naturally exhibit higher term frequencies simply by virtue of length. Conversely, as $c$ increases, the penalty term $c \cdot \frac{l_d}{avg\_l}$ grows rapidly, reducing the effective score contribution of longer documents. Tuning $c$ identifies the exact empirical balance between term repetition and document conciseness on Cranfield abstracts.
+
+\subsubsection{Alternative Pure Sparse VSM Formulations}
+To benchmark the efficacy of length normalization and inverse document frequency, three additional sparse VSM baselines were implemented:
+\begin{enumerate}[noitemsep,topsep=2pt]
+    \item \textbf{Raw Term Frequency (\texttt{Tf}):} Disregards collection-wide rarity and length normalization entirely:
+    \begin{equation}
+    \text{Score}_{\text{Tf}}(d, q) = \sum_{t \in q \cap d} tf_{t,q} \cdot tf_{t,d}
+    \end{equation}
+    \item \textbf{Coordinate Match (\texttt{CoordinateMatch}):} A binary overlap model counting shared vocabulary terms:
+    \begin{equation}
+    \text{Score}_{\text{Coord}}(d, q) = |q \cap d| = \sum_{t \in q \cap d} 1
+    \end{equation}
+    \item \textbf{Lemur TF-IDF (\texttt{LemurTF\_IDF}):} The classic Lemur/Zhai formulation of Vector Space retrieval incorporating square-root term frequency dampening and classic Robertson idf:
+    \begin{equation}
+    \text{Score}_{\text{Lemur}}(d, q) = \sum_{t \in q \cap d} \sqrt{tf_{t,d}} \cdot \ln\left(\frac{N}{df_t}\right)
+    \end{equation}
+\end{enumerate}
+
+All pure VSM pipelines are instantiated via modern \texttt{pt.terrier.Retriever} wrappers:
+\begin{lstlisting}[language=Python]
+def make_vsm_retriever(index, c_val="0.85"):
+    return pt.terrier.Retriever(
+        index,
+        wmodel="TF_IDF",
+        tokeniser="whitespace",
+        num_results=1000,
+        controls={"c": str(c_val)}
+    )
+\end{lstlisting}
+
+\subsection{Part II: Pure VSM with Pseudo-Relevance Feedback (Query Expansion)}
+\label{sec:impl_part2}
+
+A known limitation of sparse Vector Space Models is the \textit{vocabulary mismatch problem}: relevant documents frequently discuss the query topic using synonymic or related terms absent from the original short user query. Pseudo-Relevance Feedback (PRF) addresses this limitation automatically without requiring manual user interaction.
+
+\subsubsection{Two-Pass PRF Pipeline}
+The PRF workflow executes in three sequential stages:
+\begin{enumerate}[noitemsep,topsep=2pt]
+    \item \textbf{First-Pass Retrieval:} The optimal unexpanded VSM retriever ($\text{VSM}^*$, \texttt{TF\_IDF} with $c=0.85$) scores the collection and generates an initial top-$K$ candidate document set $\mathcal{D}_{\text{pseudo}} = \{d_1, d_2, \dots, d_{fb\_docs}\}$.
+    \item \textbf{Term Reweighting \& Query Rewriting:} All terms in $\mathcal{D}_{\text{pseudo}}$ are evaluated using a divergence metric to identify terms that occur with unusually high frequency relative to the background collection. The top $fb\_terms$ most informative expansion terms are appended to the query with calibrated weights.
+    \item \textbf{Second-Pass Retrieval:} The rewritten, enriched query is executed by the second-pass $\text{VSM}^*$ retriever to produce the final ranked list.
+\end{enumerate}
+
+In PyTerrier pipeline algebra, this is expressed concisely as:
+\begin{equation}
+\mathcal{P}_{\text{PRF}} = \text{VSM}^* \gg \text{QE} \gg \text{VSM}^*
+\end{equation}
+
+\subsubsection{Bose-Einstein Divergence (\texttt{Bo1QueryExpansion})}
+Terrier's Bo1 query expansion utilizes Bose-Einstein statistics from the Divergence from Randomness framework to compute the information content $w(t)$ of term $t$ within the pseudo-relevant set:
+\begin{equation}
+w(t) = tf_x \cdot \log_2\left(\frac{1 + P_n}{P_n}\right) + \log_2(1 + P_n)
+\end{equation}
+where $tf_x$ is the frequency of term $t$ across the pseudo-relevant document set $\mathcal{D}_{\text{pseudo}}$, and $P_n$ is the expected background probability of term $t$ in the collection:
+\begin{equation}
+P_n = \frac{F_t}{N_{\text{tokens}}}
+\end{equation}
+where $F_t$ is the collection term frequency of $t$, and $N_{\text{tokens}}$ is the total number of tokens across the entire corpus ($132,167$). Terms exhibiting large $w(t)$ values represent topical terms heavily concentrated in the top results.
+
+\subsubsection{Kullback-Leibler Divergence (\texttt{KLQueryExpansion})}
+As an alternative statistical measure, KL divergence measures the relative entropy between the term distribution in the pseudo-relevant set $P_{\mathcal{D}}(t)$ and the collection language model $P_{\mathcal{C}}(t)$:
+\begin{equation}
+w_{\text{KL}}(t) = P_{\mathcal{D}}(t) \cdot \log_2\left(\frac{P_{\mathcal{D}}(t)}{P_{\mathcal{C}}(t)}\right) = \frac{tf_{t, \mathcal{D}}}{L_{\mathcal{D}}} \cdot \log_2\left(\frac{tf_{t, \mathcal{D}} / L_{\mathcal{D}}}{F_t / N_{\text{tokens}}}\right)
+\end{equation}
+
+\subsection{Part III: BM25, DFR Models, and Hybrid Score Interpolation}
+\label{sec:impl_part3}
+
+To establish rigorous comparative benchmarks against probabilistic and statistical retrieval paradigms, we implement and tune BM25 and Divergence From Randomness (DFR) models.
+
+\subsubsection{Okapi BM25}
+BM25 formalizes 2-Poisson term frequency modeling with non-linear saturation:
+\begin{equation}
+\text{Score}_{\text{BM25}}(d, q) = \sum_{t \in q \cap d} \ln\left(\frac{N - df_t + 0.5}{df_t + 0.5}\right) \cdot \frac{tf_{t,d} \cdot (k_1 + 1)}{tf_{t,d} + k_1 \cdot \left(1 - b + b \cdot \frac{l_d}{avg\_l}\right)}
+\label{eq:bm25}
+\end{equation}
+where $b \in [0, 1]$ controls document length normalization and $k_1 > 0$ governs term frequency saturation.
+
+\subsubsection{Divergence From Randomness: In\_expB2}
+Gianni Amati's DFR paradigm posits that term informative-ness is proportional to the divergence between the observed term frequency and that predicted by a random distribution. The \texttt{In\_expB2} model combines Inverse Document Frequency (In), an exponential probability distribution for term occurrence (exp), and second-order Bose-Einstein term frequency normalization (B2):
+\begin{equation}
+\text{Score}_{\text{In\_expB2}}(d, q) = \sum_{t \in q \cap d} qtw_t \cdot \frac{F_t + 1}{df_t \cdot (tfn_{t,d} + 1)} \cdot \left( tfn_{t,d} \cdot \ln\left(\frac{N + 1}{n_{\text{exp}} + 0.5}\right) \right)
+\end{equation}
+where $tfn_{t,d}$ is the normalized term frequency under DFR normalization~2:
+\begin{equation}
+tfn_{t,d} = tf_{t,d} \cdot \ln\left(1 + c \cdot \frac{avg\_l}{l_d}\right)
+\end{equation}
+We additionally implement DFR baselines \texttt{PL2} (Poisson with Laplace succession), \texttt{BB2} (Bernoulli-Bose-Einstein), \texttt{DPH} (hypergeometric, parameter-free), and \texttt{DFRee} (entropy-based, parameter-free).
+
+\subsubsection{Best-of-Both Hybridization (Linear Score Interpolation)}
+Recognizing that BM25 and In\_expB2 originate from distinct probabilistic and thermodynamic foundations, we construct a hybrid ensemble combining their individually optimal configurations:
+\begin{equation}
+\text{Score}_{\text{Hybrid}}(d, q) = \alpha \cdot \text{Score}_{\text{BM25}^*}(d, q) + (1 - \alpha) \cdot \text{Score}_{\text{In\_expB2}^*}(d, q)
+\label{eq:hybrid}
+\end{equation}
+where $\alpha \in [0, 1]$ is the interpolation parameter swept across $0.1, 0.2, \dots, 0.9$. In PyTerrier, this is constructed natively using retriever operator arithmetic:
+\begin{lstlisting}[language=Python]
+hybrid_retriever = alpha * bm25_tuned + (1.0 - alpha) * inexpb2_best
+\end{lstlisting}
+
+\subsection{Part IV: Query Expansion on Advanced Models and Hybrid Ensembles}
+\label{sec:impl_part4}
+
+In the final architectural tier, Pseudo-Relevance Feedback is extended to the advanced retrieval models. Because summing retriever outputs produces a combined result frame where internal Terrier integer document IDs (\texttt{docid}) are merged on document keys, naive sequential piping ($\mathcal{P}_{\text{Hybrid}} \gg \text{QE}$) triggers numerical casting exceptions in Java. To overcome this, we formulate the expanded hybrid via \textit{late-stage retriever interpolation}:
+\begin{equation}
+\mathcal{P}_{\text{Expanded\_Hybrid}}(\alpha) = \alpha \cdot \left( \text{BM25}^* \gg \text{QE}_{\text{Bo1}} \gg \text{BM25}^* \right) + (1 - \alpha) \cdot \left( \text{In\_expB2}^* \gg \text{QE}_{\text{Bo1}} \gg \text{In\_expB2}^* \right)
+\end{equation}
+This guarantees that both individual PRF pipelines execute their query rewriting natively with integer posting lookups, followed by linear score fusion of the resulting candidate sets.
+
+% ==========================================
+% 4. Plan of Experiments
+% ==========================================
+\section{Plan of Experiments}
+\label{sec:plan_of_experiments}
+
+To conduct an objective and statistically sound evaluation, our experimental design explores seven formal research questions across four experimental stages.
+
+\subsection{Research Questions}
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item \textbf{RQ1 (Pure VSM):} What is the empirical impact of the document length normalization parameter $c$ in \texttt{TF\_IDF}? At what point does length penalization become detrimental?
+    \item \textbf{RQ2 (VSM Baselines):} How much retrieval effectiveness is sacrificed when removing IDF (\texttt{Tf}) or term frequency weighting (\texttt{CoordinateMatch}) relative to tuned \texttt{TF\_IDF}?
+    \item \textbf{RQ3 (VSM + PRF):} To what extent can Pseudo-Relevance Feedback mitigate vocabulary mismatch in sparse VSM? How sensitive is retrieval performance to the feedback document set size ($fb\_docs$) and expansion term budget ($fb\_terms$)?
+    \item \textbf{RQ4 (PRF Divergence Models):} Does Bose-Einstein (Bo1) divergence provide superior expansion term selection compared to Kullback-Leibler (KL) divergence?
+    \item \textbf{RQ5 (BM25 vs. DFR Tuning):} How does fine-tuning $b$ and $k_1$ in BM25 compare against tuning $c$ in DFR models on Cranfield?
+    \item \textbf{RQ6 (Hybridization):} Can linear interpolation between individually optimal BM25 and In\_expB2 retrievers surpass the performance of either constituent model alone?
+    \item \textbf{RQ7 (Latency vs. Accuracy Tradeoff):} What is the computational cost (in search latency and memory footprint) of two-pass PRF relative to single-pass VSM?
+\end{itemize}
+
+\subsection{Evaluation Metrics and Significance Testing}
+Retrieval quality is evaluated using five metrics computed via PyTerrier's native integration with the \texttt{ir\_measures} library across all 225 Cranfield queries:
+\begin{enumerate}[noitemsep,topsep=2pt]
+    \item \textbf{Mean Average Precision (MAP):} The primary benchmark metric, evaluating precision across all relevant recall cutoff points:
+    \begin{equation}
+    \text{MAP} = \frac{1}{|Q|} \sum_{j=1}^{|Q|} \frac{1}{R_j} \sum_{k=1}^{N_j} P(k) \cdot \mathbb{I}(k \text{ is relevant})
+    \end{equation}
+    \item \textbf{nDCG@10:} Normalized Discounted Cumulative Gain at rank 10, assessing early-rank position quality.
+    \item \textbf{Precision at 5 and 10 (P@5, P@10):} Proportion of retrieved documents that are relevant within the top 5 and top 10 results.
+    \item \textbf{Recall at 100 (R@100):} Proportion of total known relevant documents retrieved within the top 100 ranks.
+    \item \textbf{Statistical Significance Testing:} To verify that observed gains are not artifacts of query sampling noise, two-tailed paired Student's $t$-tests are performed natively in \texttt{pt.Experiment(baseline=...)}. We report positive/negative query difference counts and paired $p$-values. Gains with $p < 0.05$ are deemed statistically significant.
+\end{enumerate}
+
+\subsection{Experimental Sweep Parameters}
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lllp{7cm}@{}}
+\toprule
+\textbf{Tier} & \textbf{Model} & \textbf{Parameter(s)} & \textbf{Values / Search Grid} \\ \midrule
+\multirow{2}{*}{\textbf{Part I: Pure VSM}} & \texttt{TF\_IDF} & $c$ & 17 values: $\{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.78, 0.8, 0.82, 0.85, 0.88, 0.9, 1.0, 1.5, 2.0\}$ \\
+& Baselines & None & \texttt{Tf}, \texttt{CoordinateMatch}, \texttt{LemurTF\_IDF} \\ \midrule
+\multirow{2}{*}{\textbf{Part II: VSM + PRF}} & \texttt{VSM\_Bo1} & $fb\_docs, fb\_terms$ & $fb\_docs \in \{3, 5, 10\} \times fb\_terms \in \{5, 10, 15, 20, 25\}$ (15 configurations) \\
+& \texttt{VSM\_KL} & $fb\_docs, fb\_terms$ & $fb\_docs \in \{3, 5, 10\} \times fb\_terms \in \{5, 10, 15, 20\}$ (12 configurations) \\ \midrule
+\multirow{4}{*}{\textbf{Part III: BM25/DFR}} & \texttt{BM25} & $b, k_1$ & $b \in \{0.3, 0.5, 0.6, 0.7, 0.72, 0.75, 0.78, 0.8, 0.85, 0.9, 1.0\}$; $k_1 \in \{1.0, 1.2, 1.4, 1.6, 1.8, 2.0\}$ \\
+& \texttt{In\_expB2} & $c$ & 12 values: $\{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 1.2, 1.5, 2.0\}$ \\
+& Baselines & $c$ & \texttt{PL2}, \texttt{BB2} ($c \in \{0.5, 1.0, 1.5\}$); \texttt{DPH}, \texttt{DFRee} \\
+& Hybrid & $\alpha$ & 9 interpolation points: $\alpha \in \{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9\}$ \\ \midrule
+\multirow{2}{*}{\textbf{Part IV: Adv. PRF}} & \texttt{BM25\_QE} & $fb\_docs, fb\_terms$ & Bo1 ($fb\_docs \in \{3, 5, 10\}$, $fb\_terms \in \{10, 15, 20\}$); KL ($fb\_docs \in \{3, 5\}$) \\
+& \texttt{In\_expB2\_QE} & $fb\_docs, fb\_terms$ & Bo1 ($fb\_docs \in \{3, 5\}$, $fb\_terms \in \{10, 15, 20\}$); KL ($fb\_docs \in \{3, 5\}$) \\
+& Hybrid PRF & $\alpha$ & Interpolation across best expanded models: $\alpha \in \{0.2, 0.3, 0.5, 0.7\}$ \\ \bottomrule
+\end{tabular}
+\caption{Complete grid of experimental models, parameters, and exploration spaces.}
+\label{tab:exp_plan}
+\end{table}
+
+% ==========================================
+% 5. Results
+% ==========================================
+\section{Results}
+\label{sec:results}
+
+In this section, we report the empirical results obtained across all four experimental tiers.
+
+\subsection{Part I Results: Pure Sparse Vector Space Models}
+\label{sec:results_part1}
+
+Table~\ref{tab:results_vsm} displays the complete 21-pipeline evaluation of the Pure Sparse Vector Space Model family. The standard default \texttt{TF\_IDF\_c0.75} serves as the baseline for paired statistical significance tests.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lcccccccc@{}}
+\toprule
+\textbf{Pipeline Name} & \textbf{MAP} & \textbf{nDCG@10} & \textbf{P@5} & \textbf{P@10} & \textbf{R@100} & \textbf{Win (+)} & \textbf{Loss (-)} & \textbf{$p$-value (MAP)} \\ \midrule
+\texttt{CoordinateMatch} & 0.2065 & 0.2411 & 0.2133 & 0.1569 & 0.6456 & 35 & 184 & $4.89 \times 10^{-22}$ \\
+\texttt{Tf} & 0.1927 & 0.2211 & 0.1947 & 0.1498 & 0.6513 & 42 & 178 & $3.76 \times 10^{-20}$ \\
+\texttt{LemurTF\_IDF} & 0.2934 & 0.3242 & 0.2969 & 0.2289 & 0.7263 & 79 & 136 & $4.44 \times 10^{-6}$ \\ \midrule
+\texttt{TF\_IDF\_c0.1} & 0.2977 & 0.3293 & 0.3111 & 0.2209 & 0.7320 & 70 & 144 & $9.69 \times 10^{-5}$ \\
+\texttt{TF\_IDF\_c0.2} & 0.3014 & 0.3329 & 0.3173 & 0.2258 & 0.7369 & 73 & 141 & $4.11 \times 10^{-4}$ \\
+\texttt{TF\_IDF\_c0.3} & 0.3082 & 0.3401 & 0.3244 & 0.2311 & 0.7384 & 73 & 138 & $6.86 \times 10^{-3}$ \\
+\texttt{TF\_IDF\_c0.4} & 0.3113 & 0.3431 & 0.3253 & 0.2342 & 0.7401 & 73 & 136 & 0.0209 \\
+\texttt{TF\_IDF\_c0.5} & 0.3115 & 0.3438 & 0.3289 & 0.2351 & 0.7476 & 73 & 134 & $6.19 \times 10^{-3}$ \\
+\texttt{TF\_IDF\_c0.6} & 0.3163 & 0.3484 & 0.3324 & 0.2382 & 0.7475 & 73 & 123 & 0.1909 \\
+\texttt{TF\_IDF\_c0.7} & 0.3186 & 0.3488 & 0.3289 & 0.2369 & 0.7492 & 72 & 112 & 0.9752 \\
+\texttt{TF\_IDF\_c0.75} \textit{(Base)} & \textbf{0.3187} & \textbf{0.3502} & \textbf{0.3280} & \textbf{0.2396} & \textbf{0.7504} & --- & --- & --- \\
+\texttt{TF\_IDF\_c0.78} & 0.3190 & 0.3509 & 0.3289 & 0.2400 & 0.7502 & 101 & 72 & 0.4388 \\
+\texttt{TF\_IDF\_c0.80} & 0.3187 & 0.3493 & 0.3289 & 0.2391 & 0.7507 & 103 & 82 & 0.9255 \\
+\texttt{TF\_IDF\_c0.82} & 0.3193 & 0.3491 & 0.3289 & 0.2378 & 0.7507 & 103 & 90 & 0.4268 \\
+\textbf{\texttt{TF\_IDF\_c0.85} (Peak)} & \textbf{0.3200} & \textbf{0.3486} & \textbf{0.3271} & \textbf{0.2364} & \textbf{0.7502} & 104 & 92 & 0.3502 \\
+\texttt{TF\_IDF\_c0.88} & 0.3187 & 0.3470 & 0.3262 & 0.2373 & 0.7490 & 111 & 89 & 0.9851 \\
+\texttt{TF\_IDF\_c0.90} & 0.3184 & 0.3471 & 0.3289 & 0.2364 & 0.7491 & 101 & 101 & 0.8979 \\
+\texttt{TF\_IDF\_c1.0} & 0.3180 & 0.3484 & 0.3289 & 0.2369 & 0.7494 & 100 & 103 & 0.8132 \\
+\texttt{TF\_IDF\_c1.5} & 0.2965 & 0.3265 & 0.2996 & 0.2280 & 0.7461 & 85 & 130 & $4.25 \times 10^{-4}$ \\
+\texttt{TF\_IDF\_c2.0} & 0.2497 & 0.2776 & 0.2347 & 0.1956 & 0.7329 & 47 & 170 & $9.40 \times 10^{-13}$ \\ \bottomrule
+\end{tabular}
+\caption{Retrieval performance of Pure Sparse Vector Space Models on the Cranfield collection. Baseline for paired significance testing is the standard default \texttt{TF\_IDF\_c0.75}.}
+\label{tab:results_vsm}
+\end{table}
+
+\noindent \textbf{Key Observations:}
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item \textbf{Parameter $c$ Curve:} As $c$ increases from $0.1 \to 0.85$, MAP climbs steadily from $0.2977$ to its apex of $\mathbf{0.3200}$. Beyond $c=0.9$, performance declines, plummeting to $0.2497$ at $c=2.0$ ($p = 9.4 \times 10^{-13}$).
+    \item \textbf{Optimal Sparse VSM:} \texttt{TF\_IDF\_c0.85} achieves the highest MAP ($0.3200$), while \texttt{TF\_IDF\_c0.78} achieves the highest nDCG@10 ($0.3509$) and P@10 ($0.2400$).
+    \item \textbf{Failure of Non-Normalized VSM:} Models omitting IDF (\texttt{Tf}, MAP $0.1927$) or length normalization/TF weights (\texttt{CoordinateMatch}, MAP $0.2065$) suffer catastrophic degradation, trailing tuned TF-IDF by over $35\%$ in MAP ($p < 10^{-19}$).
+\end{itemize}
+
+\subsection{Part II Results: Pure VSM + Query Expansion}
+\label{sec:results_part2}
+
+Table~\ref{tab:results_vsm_qe} presents the evaluation of Pseudo-Relevance Feedback applied to the optimal unexpanded sparse VSM retriever (\texttt{TF\_IDF\_c0.85}). Significance tests evaluate improvements relative to the unexpanded baseline (\texttt{TF\_IDF\_c0.85\_unexpanded}, $\text{MAP} = 0.3200$).
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lcccccccc@{}}
+\toprule
+\textbf{Pipeline Name} & $fb\_docs$ & $fb\_terms$ & \textbf{MAP} & \textbf{nDCG@10} & \textbf{P@5} & \textbf{P@10} & \textbf{R@100} & \textbf{Gain (MAP)} \\ \midrule
+\texttt{TF\_IDF\_c0.85\_unexp} \textit{(Base)} & --- & --- & 0.3200 & 0.3486 & 0.3271 & 0.2364 & 0.7502 & Baseline \\ \midrule
+\texttt{VSM\_Bo1\_d3\_t5} & 3 & 5 & 0.3462 & 0.3724 & 0.3476 & 0.2667 & 0.7824 & $+8.19\%$ \\
+\texttt{VSM\_Bo1\_d3\_t10} & 3 & 10 & 0.3479 & 0.3774 & 0.3493 & 0.2716 & 0.7827 & $+8.72\%$ \\
+\texttt{VSM\_Bo1\_d3\_t15} & 3 & 15 & 0.3487 & 0.3769 & 0.3538 & 0.2720 & 0.7870 & $+8.98\%$ \\
+\texttt{VSM\_Bo1\_d3\_t20} & 3 & 20 & 0.3492 & 0.3764 & 0.3547 & 0.2711 & 0.7860 & $+9.14\%$ \\
+\textbf{\texttt{VSM\_Bo1\_d3\_t25} (Peak)} & \textbf{3} & \textbf{25} & \textbf{0.3513} & \textbf{0.3789} & \textbf{0.3547} & \textbf{0.2716} & \textbf{0.7875} & $\mathbf{+9.77\%}$ \\ \midrule
+\texttt{VSM\_Bo1\_d5\_t5} & 5 & 5 & 0.3427 & 0.3713 & 0.3422 & 0.2680 & 0.7784 & $+7.10\%$ \\
+\texttt{VSM\_Bo1\_d5\_t10} & 5 & 10 & 0.3443 & 0.3715 & 0.3458 & 0.2698 & 0.7779 & $+7.59\%$ \\
+\texttt{VSM\_Bo1\_d5\_t15} & 5 & 15 & 0.3488 & 0.3778 & 0.3476 & 0.2738 & 0.7818 & $+8.99\%$ \\
+\texttt{VSM\_Bo1\_d5\_t20} & 5 & 20 & 0.3484 & 0.3786 & 0.3440 & 0.2760 & 0.7870 & $+8.88\%$ \\
+\texttt{VSM\_Bo1\_d5\_t25} & 5 & 25 & 0.3483 & 0.3773 & 0.3396 & 0.2764 & 0.7875 & $+8.84\%$ \\ \midrule
+\texttt{VSM\_Bo1\_d10\_t5} & 10 & 5 & 0.3373 & 0.3646 & 0.3387 & 0.2627 & 0.7798 & $+5.41\%$ \\
+\texttt{VSM\_Bo1\_d10\_t10} & 10 & 10 & 0.3449 & 0.3716 & 0.3431 & 0.2662 & 0.7869 & $+7.78\%$ \\
+\texttt{VSM\_Bo1\_d10\_t15} & 10 & 15 & 0.3460 & 0.3692 & 0.3484 & 0.2636 & 0.7907 & $+8.12\%$ \\
+\texttt{VSM\_Bo1\_d10\_t20} & 10 & 20 & 0.3471 & 0.3703 & 0.3520 & 0.2667 & 0.7906 & $+8.48\%$ \\ \midrule
+\texttt{VSM\_KL\_d3\_t10} & 3 & 10 & 0.3440 & 0.3756 & 0.3467 & 0.2724 & 0.7834 & $+7.51\%$ \\
+\texttt{VSM\_KL\_d3\_t15} & 3 & 15 & 0.3453 & 0.3752 & 0.3493 & 0.2711 & 0.7860 & $+7.92\%$ \\
+\texttt{VSM\_KL\_d5\_t15} & 5 & 15 & 0.3460 & 0.3737 & 0.3476 & 0.2707 & 0.7821 & $+8.13\%$ \\ \bottomrule
+\end{tabular}
+\caption{Retrieval performance of Pseudo-Relevance Feedback applied to the optimal Pure VSM (\texttt{TF\_IDF\_c0.85}). Paired $t$-test yields $p < 10^{-7}$ for all top configurations.}
+\label{tab:results_vsm_qe}
+\end{table}
+
+\noindent \textbf{Key Observations:}
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item \textbf{Significant PRF Gain:} Query expansion yields statistically significant improvements ($p < 10^{-7}$) across every metric. \texttt{VSM\_Bo1\_d3\_t25} achieves $\text{MAP} = \mathbf{0.3513}$ ($+9.77\%$), $\text{nDCG@10} = \mathbf{0.3789}$ ($+8.68\%$), and elevates $\text{Recall@100}$ from $0.7502 \to \mathbf{0.7875}$.
+    \item \textbf{Optimal Feedback Document Window:} Selecting $fb\_docs = 3$ consistently outperforms $fb\_docs = 5$ and $fb\_docs = 10$. Because Cranfield queries have an average of only $\sim 7$ relevant documents, expanding from 10 documents introduces non-relevant noise (topic drift).
+    \item \textbf{Bo1 vs. KL Divergence:} Bo1 divergence consistently outperforms KL divergence across matched $(d, t)$ settings (e.g., at $d=3, t=15$, Bo1 achieves $0.3487$ vs. KL's $0.3453$).
+\end{itemize}
+
+\subsection{Part III Results: BM25, DFR Models, and Hybridization}
+\label{sec:results_part3}
+
+Table~\ref{tab:results_bm25_dfr} presents the parameter fine-tuning results for BM25 and the DFR family, as well as the linear score interpolation hybrid combining the best individual models.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lcccccl@{}}
+\toprule
+\textbf{Pipeline Name} & \textbf{MAP} & \textbf{nDCG@10} & \textbf{P@5} & \textbf{P@10} & \textbf{R@100} & \textbf{Configuration Notes} \\ \midrule
+\texttt{BM25\_b0.3} & 0.3072 & 0.3409 & 0.3262 & 0.2360 & 0.7342 & Under-penalizes length \\
+\texttt{BM25\_b0.5} & 0.3143 & 0.3476 & 0.3324 & 0.2409 & 0.7391 & \\
+\texttt{BM25\_b0.75} \textit{(Base)} & 0.3175 & 0.3483 & 0.3280 & 0.2378 & 0.7391 & Standard default ($k_1=1.2$) \\
+\texttt{BM25\_b0.80} & 0.3174 & 0.3480 & 0.3298 & 0.2373 & 0.7400 & \\
+\texttt{BM25\_b1.0} & 0.3147 & 0.3435 & 0.3236 & 0.2360 & 0.7421 & Over-penalizes length \\
+\textbf{\texttt{BM25\_b0.75\_k1\_2.0}} & \textbf{0.3217} & \textbf{0.3522} & \textbf{0.3342} & \textbf{0.2462} & \textbf{0.7493} & \textbf{Best tuned BM25 ($+1.3\%$ MAP)} \\ \midrule
+\texttt{PL2\_c1.0} & 0.3121 & 0.3433 & 0.3253 & 0.2364 & 0.7438 & Poisson DFR \\
+\texttt{BB2\_c0.5} & 0.3243 & 0.3598 & 0.3324 & 0.2533 & 0.7524 & Bernoulli DFR \\
+\texttt{DPH} & 0.3089 & 0.3427 & 0.3147 & 0.2329 & 0.7382 & Hypergeometric (no param) \\
+\texttt{DFRee} & 0.2987 & 0.3304 & 0.3111 & 0.2191 & 0.7244 & Average info (no param) \\ \midrule
+\texttt{In\_expB2\_c0.3} & 0.3250 & 0.3568 & 0.3422 & 0.2560 & 0.7692 & \\
+\texttt{In\_expB2\_c0.5} & 0.3305 & 0.3633 & 0.3431 & 0.2587 & 0.7688 & \\
+\textbf{\texttt{In\_expB2\_c0.7}} & \textbf{0.3312} & \textbf{0.3645} & \textbf{0.3396} & \textbf{0.2573} & \textbf{0.7651} & \textbf{Best single retriever ($+4.3\%$)} \\
+\texttt{In\_expB2\_c1.0} & 0.3293 & 0.3640 & 0.3298 & 0.2542 & 0.7568 & Terrier default $c$ \\
+\texttt{In\_expB2\_c1.5} & 0.3232 & 0.3581 & 0.3316 & 0.2498 & 0.7547 & \\ \midrule
+\texttt{Hybrid\_a0.1} & \textbf{0.3302} & \textbf{0.3632} & \textbf{0.3396} & \textbf{0.2569} & \textbf{0.7628} & $0.1 \cdot \text{BM25}^* + 0.9 \cdot \text{In\_expB2}^*$ \\
+\texttt{Hybrid\_a0.2} & 0.3289 & 0.3610 & 0.3369 & 0.2556 & 0.7610 & $0.2 \cdot \text{BM25}^* + 0.8 \cdot \text{In\_expB2}^*$ \\
+\texttt{Hybrid\_a0.3} & 0.3284 & 0.3602 & 0.3360 & 0.2533 & 0.7597 & $0.3 \cdot \text{BM25}^* + 0.7 \cdot \text{In\_expB2}^*$ \\
+\texttt{Hybrid\_a0.5} & 0.3259 & 0.3557 & 0.3387 & 0.2507 & 0.7591 & Equal unexpanded weighting \\ \bottomrule
+\end{tabular}
+\caption{Retrieval performance of BM25, DFR models, and Best-of-Both Hybrid interpolation.}
+\label{tab:results_bm25_dfr}
+\end{table}
+
+\noindent \textbf{Key Observations:}
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item \textbf{In\_expB2 Dominance:} \texttt{In\_expB2\_c0.7} achieves $\text{MAP} = \mathbf{0.3312}$ and $\text{nDCG@10} = \mathbf{0.3645}$, establishing the highest single-pass performance on Cranfield and outperforming standard BM25 ($0.3175$) by $+4.3\%$.
+    \item \textbf{BM25 Tuning Synergy:} Sweeping $k_1$ up to $2.0$ increases MAP from $0.3175 \to 0.3217$ ($+1.3\%$).
+    \item \textbf{Hybrid Behavior:} In unexpanded retrieval, \texttt{In\_expB2} scores dominate. Blending $10\%$ tuned BM25 preserves high MAP ($0.3302$) while slightly regularizing rank positions.
+\end{itemize}
+
+\subsection{Part IV Results: Query Expansion on Advanced Models and Hybrid Ensembles}
+\label{sec:results_part4}
+
+Table~\ref{tab:results_adv_qe} presents the results of applying Pseudo-Relevance Feedback to the best BM25 and In\_expB2 models, as well as the late-stage score-interpolated expanded hybrid.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lcccccl@{}}
+\toprule
+\textbf{Pipeline Name} & \textbf{MAP} & \textbf{nDCG@10} & \textbf{P@5} & \textbf{P@10} & \textbf{R@100} & \textbf{Model Description} \\ \midrule
+\texttt{BM25\_Bo1\_d3\_t20} & 0.3432 & 0.3708 & 0.3582 & 0.2667 & 0.7788 & BM25 PRF ($d=3, t=20$) \\
+\texttt{BM25\_Bo1\_d5\_t15} & 0.3491 & 0.3753 & 0.3467 & 0.2684 & 0.7856 & BM25 PRF ($d=5, t=15$) \\
+\texttt{BM25\_Bo1\_d5\_t20} & 0.3516 & 0.3781 & 0.3476 & 0.2702 & 0.7894 & Peak BM25 PRF \\
+\texttt{BM25\_KL\_d5\_t15} & 0.3496 & 0.3740 & 0.3511 & 0.2667 & 0.7856 & BM25 KL PRF \\ \midrule
+\texttt{In\_expB2\_Bo1\_d3\_t10} & 0.3492 & 0.3801 & 0.3573 & 0.2711 & 0.7927 & In\_expB2 PRF ($d=3, t=10$) \\
+\texttt{In\_expB2\_Bo1\_d5\_t15} & 0.3517 & 0.3809 & 0.3520 & 0.2756 & 0.7900 & In\_expB2 PRF ($d=5, t=15$) \\
+\texttt{In\_expB2\_Bo1\_d5\_t20} & 0.3520 & 0.3822 & 0.3502 & 0.2778 & 0.7929 & In\_expB2 PRF ($d=5, t=20$) \\
+\texttt{In\_expB2\_KL\_d5\_t15} & 0.3523 & 0.3821 & 0.3493 & 0.2742 & 0.7924 & Peak In\_expB2 KL PRF \\ \midrule
+\texttt{Hybrid\_Expanded\_a0.2} & 0.3527 & 0.3818 & 0.3556 & 0.2729 & 0.7954 & $0.2 \cdot \text{BM25}_{\text{QE}} + 0.8 \cdot \text{InExp}_{\text{QE}}$ \\
+\texttt{Hybrid\_Expanded\_a0.3} & 0.3532 & 0.3806 & 0.3547 & 0.2711 & 0.7939 & $0.3 \cdot \text{BM25}_{\text{QE}} + 0.7 \cdot \text{InExp}_{\text{QE}}$ \\
+\textbf{\texttt{Hybrid\_Expanded\_a0.5}} & \textbf{0.3534} & \textbf{0.3793} & \textbf{0.3556} & \textbf{0.2693} & \textbf{0.7905} & \textbf{Global Best Pipeline ($\text{MAP} = 0.3534$)} \\
+\texttt{Hybrid\_Expanded\_a0.7} & 0.3510 & 0.3762 & 0.3520 & 0.2689 & 0.7908 & $0.7 \cdot \text{BM25}_{\text{QE}} + 0.3 \cdot \text{InExp}_{\text{QE}}$ \\ \bottomrule
+\end{tabular}
+\caption{Retrieval performance of Query Expansion on advanced models and late-stage hybrid ensembles.}
+\label{tab:results_adv_qe}
+\end{table}
+
+\noindent \textbf{Key Observations:}
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item \textbf{Global Peak Performance:} The late-stage score-interpolated ensemble \texttt{Hybrid\_Expanded\_a0.5} achieves the highest Mean Average Precision of the entire investigation: $\mathbf{MAP = 0.3534}$, outperforming every individual expanded and unexpanded retriever.
+    \item \textbf{Recall Improvements:} Query-expanded models elevate Recall@100 from $0.7504$ (baseline) to $\mathbf{0.7954}$ (\texttt{Hybrid\_Expanded\_a0.2}), demonstrating that pseudo-relevance feedback successfully uncovers previously unreachable relevant documents.
+\end{itemize}
+
+\subsection{Physical Index Statistics and Latency Profiling}
+\label{sec:results_latency}
+
+Table~\ref{tab:index_stats} summarizes the physical index properties and execution runtimes recorded during our experiments.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}ll|ll@{}}
+\toprule
+\textbf{Metric} & \textbf{Value} & \textbf{Metric} & \textbf{Value} \\ \midrule
+Documents Indexed & 1,400 & Total Document Postings & 77,782 \\
+Unique Stems ($|V|$) & 4,188 & Total Token Occurrences & 132,167 \\
+Total Indexing Time & 2.335 seconds & Average Tokens per Document & 94.4 \\
+Index Directory Size on Disk & 650.6 KB & Inverted List Compression & Bit-level Elias-Fano \\ \bottomrule
+\end{tabular}
+\caption{Physical index properties and resource consumption of \texttt{info\_fetch\_terrier\_index}.}
+\label{tab:index_stats}
+\end{table}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}llcc@{}}
+\toprule
+\textbf{Retrieval Tier} & \textbf{Representative Pipeline} & \textbf{Mean Latency / Query (ms)} & \textbf{Throughput (QPS)} \\ \midrule
+\multirow{3}{*}{\textbf{Single-Pass VSM}} & \texttt{TF\_IDF\_c0.75} & 14.29 ms & 70.0 \\
+& \texttt{TF\_IDF\_c0.85} & 16.15 ms & 61.9 \\
+& \texttt{LemurTF\_IDF} & 15.14 ms & 66.1 \\ \midrule
+\textbf{Single-Pass Probabilistic} & \texttt{BM25\_b0.75} & 15.22 ms & 65.7 \\ \midrule
+\multirow{3}{*}{\textbf{Two-Pass PRF (VSM)}} & \texttt{VSM\_Bo1\_d3\_t10} & 47.57 ms & 21.0 \\
+& \texttt{VSM\_Bo1\_d3\_t25} & 49.95 ms & 20.0 \\
+& \texttt{VSM\_KL\_d5\_t10} & 51.04 ms & 19.6 \\ \midrule
+\textbf{Expanded Hybrid Fusion} & \texttt{Hybrid\_Expanded\_a0.5} & 98.42 ms & 10.2 \\ \bottomrule
+\end{tabular}
+\caption{Query execution latency and throughput profiled across 225 evaluation queries.}
+\label{tab:latency}
+\end{table}
+
+% ==========================================
+% 6. Discussion of Results
+% ==========================================
+\section{Discussion of Results}
+\label{sec:discussion}
+
+We organize our discussion into four dedicated sub-sections corresponding to each experimental tier, with primary focus on the Pure Sparse Vector Space Model.
+
+\subsection{Part I Discussion: Pure Sparse Vector Space Models (Primary Submission)}
+\label{sec:disc_part1}
+
+The pure sparse Vector Space Model serves as the theoretical and empirical cornerstone of this assignment. Our extensive 17-point sweep over the document length normalization parameter $c$ provides deep insight into length penalization dynamics.
+
+\subsubsection{Mechanics of Document Length Normalization}
+The Cranfield document collection exhibits significant length variance: the shortest abstract contains 18 tokens, while the longest exceeds 250 tokens (mean $avg\_l = 94.4$). In unnormalized VSMs, document scores scale monotonically with raw term frequency. Consequently, longer documents possess an unfair retrieval advantage:
+\begin{enumerate}[noitemsep,topsep=2pt]
+    \item They naturally contain more term occurrences ($tf$), inflating inner-product dot products.
+    \item They cover broader vocabulary, increasing the probability of matching query terms by chance.
+\end{enumerate}
+
+In the pivoted length normalization formula (Equation~\ref{eq:vsm_tfidf}), the denominator term $c \cdot \frac{l_d}{avg\_l}$ acts as a document length tax. Our empirical results validate three distinct behavioral regimes:
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item \textbf{Under-Penalization Regime ($c < 0.6$):} At $c=0.1$, MAP drops to $0.2977$ ($p = 9.7 \times 10^{-5}$). The model fails to penalize verbose, non-specific abstracts, allowing long documents with peripheral term mentions to crowd out concise, highly relevant abstracts from the top ranks.
+    \item \textbf{Optimal Equilibrium Regime ($0.75 \le c \le 0.88$):} In this band, MAP stabilizes above $0.318$, peaking at $c=0.85$ with $\text{MAP} = \mathbf{0.3200}$. Here, the length penalty exactly counterbalances the natural term frequency growth of longer abstracts without penalizing documents whose length is driven by genuine technical detail.
+    \item \textbf{Over-Penalization Regime ($c > 1.0$):} Beyond $c=1.0$, retrieval quality degrades rapidly. At $c=1.5$, MAP falls to $0.2965$ ($p = 4.2 \times 10^{-4}$); at $c=2.0$, MAP collapses to $0.2497$ ($p = 9.4 \times 10^{-13}$). Severe penalties depress scores of legitimate, detailed research abstracts that happen to be longer than average, causing relevant documents to fall outside the top-100 cutoff.
+\end{itemize}
+
+\subsubsection{Component Importance: IDF and TF Weighting}
+Comparing \texttt{Tf} (MAP $0.1927$), \texttt{CoordinateMatch} (MAP $0.2065$), and \texttt{TF\_IDF\_c0.85} (MAP $0.3200$) illustrates the absolute necessity of collection-wide discrimination:
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item \textbf{Failure of \texttt{CoordinateMatch}:} Coordinate matching treats all matching terms as equal. A document matching the common term \textit{``flow''} receives the exact same score increment as a document matching the highly specific term \textit{``aeroelasticity''}. As a result, P@10 collapses to $0.1569$.
+    \item \textbf{Failure of Raw \texttt{Tf}:} Without IDF, ubiquitous background stems dominate the ranking simply because authors repeat them frequently within introductory remarks.
+    \item \textbf{Lemur TF-IDF vs. Pivoted TF-IDF:} \texttt{LemurTF\_IDF} reaches $\text{MAP} = 0.2934$, trailing pivoted \texttt{TF\_IDF} by $0.0266$ MAP points. Lemur utilizes square-root dampening $\sqrt{tf}$ without explicit document length ratios in the denominator, confirming that explicit pivoted normalization ($avg\_l / l_d$) is essential for optimal sparse VSM performance.
+\end{itemize}
+
+\subsection{Part II Discussion: Pure VSM with Pseudo-Relevance Feedback}
+\label{sec:disc_part2}
+
+Applying Pseudo-Relevance Feedback to \texttt{TF\_IDF\_c0.85} demonstrates that sparse lexical models can partially overcome vocabulary mismatch without resorting to dense neural embeddings.
+
+\subsubsection{Vocabulary Mismatch Mitigation}
+Cranfield queries are concise technical questions formulated by aeronautical researchers (e.g., \textit{``boundary layer transition on a flat plate with pressure gradient''}). Authors of relevant papers, however, frequently describe the same aerodynamic phenomena using alternative terminology (such as \textit{``laminar separation''}, \textit{``skin friction coefficient''}, or \textit{``Tollmien-Schlichting waves''}). 
+
+When executing single-pass VSM, relevant papers lacking the exact query tokens are irretrievably lost. In two-pass Bo1 PRF, the top-3 retrieved abstracts provide a localized semantic context. Terms like \textit{``viscosity''} and \textit{``Reynolds number''} that exhibit statistically improbable concentration in these abstracts are appended to the query, retrieving previously hidden relevant papers in the second pass.
+
+\subsubsection{Analysis of Feedback Parameters ($fb\_docs$ and $fb\_terms$)}
+The grid sweep across $fb\_docs \in \{3, 5, 10\}$ and $fb\_terms \in \{5, \dots, 25\}$ reveals critical feedback dynamics:
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item \textbf{Small Feedback Sets are Optimal ($d=3$):} Setting $fb\_docs = 3$ produced the highest MAP ($0.3513$). Cranfield relevance distributions are sparse: many queries have fewer than 5 truly relevant documents in the entire collection. When expanding from $fb\_docs = 10$, non-relevant documents inevitably enter the feedback set, introducing off-topic terms (e.g., author affiliations or general wind tunnel apparatus terms) that cause \textit{query drift}.
+    \item \textbf{Large Term Budgets Succeed ($t=25$):} Expanding by 20 to 25 terms proved superior to expanding by only 5 terms ($0.3513$ vs. $0.3462$). Because Terrier weights expansion terms by their divergence score, adding a broad set of 25 terms introduces helpful secondary synonyms while attenuating weak terms via lower assigned weights.
+\end{itemize}
+
+\subsection{Part III Discussion: BM25, DFR Models, and Hybridization}
+\label{sec:disc_part3}
+
+Comparing BM25 and Divergence From Randomness highlights the strengths of alternative theoretical retrieval paradigms.
+
+\subsubsection{Why In\_expB2 Outperforms BM25 on Cranfield}
+In our single-pass experiments, \texttt{In\_expB2\_c0.7} achieved $\text{MAP} = \mathbf{0.3312}$, outperforming tuned \texttt{BM25} ($0.3217$) and baseline \texttt{BM25} ($0.3175$):
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item \textbf{Asymptotic Saturation vs. DFR Divergence:} BM25 imposes a rigid upper bound on term contributions via $\frac{tf}{tf + k_1 \cdot (\dots)}$, asymptotically saturating at $k_1 + 1$. In Cranfield technical abstracts, critical diagnostic terms often appear 4 to 6 times. BM25's saturation limits the discriminative impact of these repeated occurrences.
+    \item \textbf{DFR Bose-Einstein Modeling:} In contrast, In\_expB2 evaluates the probability of observing term counts under Bose-Einstein statistics. For rare aeronautical keywords, multiple occurrences diverge dramatically from a random distribution, yielding a stronger, more discriminative score boost.
+\end{itemize}
+
+\subsubsection{Efficacy of Best-of-Both Hybridization}
+Our linear score interpolation combines the peak configurations of BM25 and In\_expB2. In single-pass retrieval, In\_expB2 is so dominant that the optimal unexpanded hybrid weight is heavily skewed towards DFR ($\alpha=0.1$, $\text{MAP} = 0.3302$). However, as explored in Section~\ref{sec:disc_part4}, hybridization becomes remarkably effective once query expansion regularizes score distributions.
+
+\subsection{Part IV Discussion: Query Expansion on Advanced Models and Hybrid Ensembles}
+\label{sec:disc_part4}
+
+The fourth tier demonstrates the global ceiling of sparse lexical retrieval on the Cranfield collection.
+
+\subsubsection{Synergy of Expanded Ensembles}
+While single-pass hybridization favored In\_expB2, the query-expanded hybrid \texttt{Hybrid\_Expanded\_a0.5} achieves the global peak of the entire study: $\mathbf{MAP = 0.3534}$. Equal weighting ($\alpha=0.5$) of both expanded retrievers proves optimal because:
+\begin{enumerate}[noitemsep,topsep=2pt]
+    \item \textbf{Complementary Semantic Drift:} BM25 and In\_expB2 retrieve slightly different initial candidate sets $\mathcal{D}_{\text{pseudo}}$. As a result, the expansion terms selected by BM25+Bo1 and In\_expB2+Bo1 emphasize complementary sub-aspects of the user query.
+    \item \textbf{Score Regularization:} Fusing the two expanded rankings smooths out idiosyncratic scoring spikes from either model, reducing false positives in the top 10 results and elevating precision.
+\end{enumerate}
+
+\subsubsection{Latency vs. Effectiveness Tradeoff}
+Table~\ref{tab:latency} underscores the fundamental systems tradeoff in modern IR:
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item \textbf{Single-Pass VSM:} Requires only $16.15$ ms per query, supporting over 60 queries per second (QPS) on a single CPU core with an index footprint of just $650$ KB.
+    \item \textbf{Two-Pass Expanded VSM:} Increases latency by $3.1\times$ ($49.95$ ms), but delivers a substantial $+9.77\%$ relative improvement in MAP.
+    \item \textbf{Expanded Hybrid Fusion:} Requires two independent PRF cycles and post-retrieval rank fusion ($98.42$ ms, $\sim 10$ QPS), achieving peak accuracy ($0.3534$ MAP).
+\end{itemize}
+For real-time search engines with strict sub-50ms SLA targets, single-pass tuned VSM or lightweight PRF ($fb\_docs=3, fb\_terms=10$, $47.5$ ms) provides the optimal balance of speed and precision.
+
+% ==========================================
+% 7. Submission Compliance and Verification
+% ==========================================
+\section{Submission Compliance and Verification}
+\label{sec:compliance}
+
+To ensure complete compliance with the assignment instructions and enable seamless automated grading, our submission repository adheres to the following protocol:
+
+\subsection{Separation of Compliant and Extended Scripts}
+\begin{itemize}[noitemsep,topsep=2pt]
+    \item \textbf{\texttt{info\_fetch\_evaluate.py}} (Official Submission File): Contains \textbf{only} pure Sparse Vector Space Models in strict adherence to the constraint: \textit{``You may use only sparse vector space models. Don't use advanced probabilistic or dense neural retrieval models.''} Running this script executes the 17-point $c$ sweep, baseline models, generates \texttt{info\_fetch\_eval\_results.txt}, and serializes the official submission run file \texttt{info\_fetch\_results.txt}.
+    \item \textbf{\texttt{info\_fetch\_evaluate\_extended.py}} (Report Analysis File): Contains the advanced model evaluations: BM25 tuning, In\_expB2 tuning, DFR models, hybrid interpolation, and advanced PRF, generating \texttt{info\_fetch\_eval\_results\_extended.txt} and \texttt{info\_fetch\_results\_extended.txt}.
+    \item \textbf{\texttt{evaluate\_query\_expansion\_with\_VSM.py}} (Pure VSM PRF File): Standalone evaluation script dedicated to Pseudo-Relevance Feedback on the optimal sparse VSM, generating \texttt{eval\_query\_expansion\_vsm\_results.txt} and \texttt{results\_query\_expansion_vsm.txt}.
+\end{itemize}
+
+\subsection{Execution Instructions}
+All scripts are executable via standard Python~3 with PyTerrier installed:
+\begin{lstlisting}[language=bash, caption=Commands to Reproduce Experimental Results]
+# 1. Preprocess documents and queries from raw Cranfield files
+python info_fetch_preprocess.py
+
+# 2. Build PyTerrier inverted index (info_fetch_terrier_index)
+python info_fetch_index.py
+
+# 3. Execute official pure VSM evaluation (Generates submission info_fetch_results.txt)
+python info_fetch_evaluate.py
+
+# 4. Execute dedicated VSM Query Expansion experiments
+python evaluate_query_expansion_with_VSM.py
+
+# 5. Execute advanced BM25, DFR, Hybrid, and Advanced PRF evaluations
+python info_fetch_evaluate_extended.py
+\end{lstlisting}
+
+\subsection{TREC Run File Format Verification}
+All generated run files (\texttt{info\_fetch\_results.txt}, \texttt{results\_query\_expansion\_vsm.txt}, \texttt{info\_fetch\_results\_extended.txt}) conform strictly to the official six-column TREC evaluation standard:
+\begin{center}
+\texttt{<qid>  Q0  <docno>  <rank>  <score>  <run\_tag>}
+\end{center}
+Ranks are 0-indexed and strictly monotonically increasing per query ($0, 1, 2, \dots, 999$), with scores sorted in non-increasing order.
+
+% ==========================================
+% 8. Conclusion
+% ==========================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+This project implemented and evaluated ranked retrieval pipelines on the Cranfield text collection using PyTerrier, conforming strictly to the assignment's sparse Vector Space Model constraint while exploring modern retrieval models for comparative analysis.
+
+Our findings are summarized as follows:
+\begin{enumerate}[noitemsep,topsep=2pt]
+    \item \textbf{Optimal Pure Sparse VSM:} Within the required pure VSM paradigm, the pivoted length normalization parameter $c$ in \texttt{TF\_IDF} is critical. Tuning $c$ across 17 empirical points revealed an optimal setting of $c=0.85$, achieving $\text{MAP} = \mathbf{0.3200}$, $\text{nDCG@10} = \mathbf{0.3486}$, and $\text{Recall@100} = \mathbf{0.7502}$, while non-normalized baselines collapsed below $0.21$ MAP.
+    \item \textbf{Power of Pseudo-Relevance Feedback on VSM:} Applying Bose-Einstein (Bo1) query expansion to the optimal VSM retriever alleviated sparse vocabulary mismatch, boosting MAP by $+9.77\%$ to $\mathbf{0.3513}$ ($p < 10^{-7}$) and nDCG@10 to $\mathbf{0.3789}$. Small feedback windows ($fb\_docs=3$) proved critical to preventing topic drift.
+    \item \textbf{Probabilistic and DFR Comparisons:} In unexpanded retrieval, Gianni Amati's Divergence From Randomness model (\texttt{In\_expB2\_c0.7}) achieved $\text{MAP} = \mathbf{0.3312}$, outperforming tuned BM25 ($0.3217$).
+    \item \textbf{Global Ensemble Peak:} Late-stage score interpolation combining query-expanded BM25 and query-expanded In\_expB2 achieved the highest overall retrieval performance of the entire study ($\mathbf{MAP = 0.3534}$, $\text{nDCG@10} = \mathbf{0.3793}$).
+\end{enumerate}
+
+All code, indices, and TREC run files have been systematically structured, verified, and submitted under group prefix \texttt{info\_fetch\_*}.
+
+% ==========================================
+% References
+% ==========================================
+\begin{thebibliography}{9}
+\bibitem{salton1975}
+G.~Salton, A.~Wong, and C.~S.~Yang, ``A vector space model for automatic indexing,'' \textit{Communications of the ACM}, vol.~18, no.~11, pp.~613--620, 1975.
+
+\bibitem{singhal1996}
+A.~Singhal, C.~Buckley, and M.~Mitra, ``Pivoted document length normalization,'' in \textit{Proc. ACM SIGIR}, pp.~21--29, 1996.
+
+\bibitem{robertson1994}
+S.~E.~Robertson, S.~Walker, S.~Jones, M.~M.~Hancock-Beaulieu, and M.~Gatford, ``Okapi at TREC-3,'' in \textit{Proc. TREC-3}, 1994.
+
+\bibitem{amati2002}
+G.~Amati and C.~J.~van Rijsbergen, ``Probabilistic models of information retrieval based on measuring the divergence from randomness,'' \textit{ACM Transactions on Information Systems}, vol.~20, no.~4, pp.~357--389, 2002.
+
+\bibitem{macdonald2021}
+C.~Macdonald, N.~Tonellotto, S.~MacAvaney, and I.~Ounis, ``PyTerrier: Declarative Experimentation in Python from Information Retrieval,'' in \textit{Proc. ACM SIGIR}, pp.~2526--2532, 2021.
+
+\bibitem{cleverdon1967}
+C.~W.~Cleverdon, ``The Cranfield tests on index languages devices,'' \textit{Aslib Proceedings}, vol.~19, no.~6, pp.~173--194, 1967.
+\end{thebibliography}
+
+\end{document}

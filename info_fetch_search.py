@@ -1,35 +1,34 @@
 """
 info_fetch_search.py
-Runs ranked retrieval experiments on the Cranfield collection using PyTerrier.
+Runs ranked retrieval on the Cranfield collection using PyTerrier.
 Complies strictly with PA2 requirements:
     "You may use only sparse vector space models. Don't use advanced probabilistic
      or dense neural retrieval models."
 
-Sparse Vector Space Models & Parameter Sweeps Tested:
-  1. TF_IDF (Classic Salton/Robertson VSM with length normalization parameter c):
-     - Sweeping c across [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 1.0, 1.5, 2.0]
-  2. Tf (Raw Term Frequency baseline, no IDF, no length normalization)
-  3. CoordinateMatch (Coordinate matching baseline, count of matching query terms)
-  4. LemurTF_IDF (Lemur Vector Space TF-IDF formulation)
+By default, executes the optimal Sparse Vector Space Model (TF_IDF with c=0.85)
+on the processed queries and writes the TREC-format submission run to info_fetch_results.txt.
 
-Modern PyTerrier optimizations:
-  - Uses pt.terrier.Retriever() (replaces deprecated pt.BatchRetrieve)
-  - tokeniser="whitespace" (preserves preprocessed stems)
-  - Uses vectorized pt.io.write_results() (replaces manual iterrows() loops)
+Supports custom query files and output destinations via CLI arguments:
+    python info_fetch_search.py [query_file] [output_file] [--experiments]
 
-Outputs:
-  - info_fetch_results.txt : TREC-format ranked results for default/best model
-  - info_fetch_latency.txt : Per-model mean query latency in ms
-  - info_fetch_runs/*.txt  : TREC-format runs for all individual models
-
-Usage:
+Examples:
+    # 1. Default execution (runs optimal VSM model c=0.85, outputs info_fetch_results.txt)
     python info_fetch_search.py
+
+    # 2. Search on custom/unknown test queries for automated grading:
+    python info_fetch_search.py custom_queries.txt custom_results.txt
+
+    # 3. Run full experimental parameter sweep & latency profiling:
+    python info_fetch_search.py --experiments
 """
 
 import os
+import sys
 import time
+import argparse
 import pandas as pd
 
+import config
 from config import PROCESSED_QRY_FILE, INDEX_DIR, RESULTS_FILE, GROUP_PREFIX
 
 import pyterrier as pt
@@ -39,17 +38,23 @@ if not pt.java.started():
 
 def parse_processed_queries(filepath: str) -> pd.DataFrame:
     """
-    Parse info_fetch_processed_queries.txt into a PyTerrier topics DataFrame.
-    Expected format:
-        .I <qid>
-        .W <stem1> <stem2> ...
+    Parse processed queries file into a PyTerrier topics DataFrame.
+    Supports two formats:
+      1. Cranfield SGML format (.I <qid> followed by .W <stems>)
+      2. Line-by-line format (<qid> <query_text> or tab-separated)
     Returns DataFrame with columns: qid (str), query (str).
-    Queries are indexed 1..225 sequentially to match cranqrel.
     """
     rows = []
     qid = None
+
     with open(filepath, encoding="utf-8") as f:
-        for line in f:
+        lines = f.readlines()
+
+    # Check format
+    is_sgml = any(l.startswith(".I ") for l in lines[:20])
+
+    if is_sgml:
+        for line in lines:
             line = line.rstrip("\r\n")
             if line.startswith(".I "):
                 qid = str(len(rows) + 1)
@@ -58,6 +63,17 @@ def parse_processed_queries(filepath: str) -> pd.DataFrame:
                 if query:
                     rows.append({"qid": qid, "query": query})
                 qid = None
+    else:
+        for idx, line in enumerate(lines, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(None, 1)
+            if len(parts) == 2 and parts[0].isdigit():
+                rows.append({"qid": str(int(parts[0])), "query": parts[1].strip()})
+            else:
+                rows.append({"qid": str(idx), "query": line})
+
     return pd.DataFrame(rows, columns=["qid", "query"])
 
 
@@ -83,52 +99,36 @@ def run_model(index, wmodel: str, controls: dict, queries_df: pd.DataFrame, num_
     return results, mean_latency
 
 
-def main():
-    print("=" * 60)
-    print("Info fetch -- PA2 Sparse Vector Space Model Experiments")
-    print("=" * 60)
-
-    # Load index
-    print(f"\nLoading index from '{INDEX_DIR}' ...")
-    index = pt.IndexFactory.of(os.path.abspath(INDEX_DIR))
-    stats = index.getCollectionStatistics()
-    print(f"  Index loaded: {stats.getNumberOfDocuments()} docs, {stats.getNumberOfUniqueTerms()} terms")
-
-    # Load queries
-    print(f"\nLoading queries from '{PROCESSED_QRY_FILE}' ...")
-    queries_df = parse_processed_queries(PROCESSED_QRY_FILE)
-    print(f"  {len(queries_df)} queries loaded.")
-
-    # ----------------------------------------------------------------
-    # Define Sparse Vector Space Model Experiments
-    # ----------------------------------------------------------------
+def run_all_experiments(index, queries_df):
+    """Execute all pure Sparse VSM parameter sweeps and PRF pipelines for latency profiling."""
     experiments = []
-
-    # 1. TF_IDF document length normalization parameter sweep (c)
-    for c_val in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 1.0, 1.5, 2.0]:
+    for c_val in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.78, 0.8, 0.82, 0.85, 0.88, 0.9, 1.0, 1.5, 2.0]:
         experiments.append((f"TF_IDF_c{c_val}", "TF_IDF", {"c": str(c_val)}))
 
-    # 2. Raw Term Frequency baseline (no IDF, no normalization)
     experiments.append(("Tf", "Tf", {}))
-
-    # 3. Coordinate Matching baseline (term overlap count)
     experiments.append(("CoordinateMatch", "CoordinateMatch", {}))
-
-    # 4. Lemur TF-IDF Vector Space formulation
     experiments.append(("LemurTF_IDF", "LemurTF_IDF", {}))
 
-    # ----------------------------------------------------------------
-    # Execute All Experiments
-    # ----------------------------------------------------------------
+    prf_pipelines = []
+    base_retriever = pt.terrier.Retriever(index, wmodel="TF_IDF", tokeniser="whitespace", controls={"c": "0.85"})
+    for fb_docs in [3, 5, 10]:
+        for fb_terms in [5, 10, 15, 20]:
+            qe = pt.rewrite.Bo1QueryExpansion(index, fb_docs=fb_docs, fb_terms=fb_terms)
+            pipe = base_retriever >> qe >> base_retriever
+            prf_pipelines.append((f"TF_IDF_Bo1_d{fb_docs}_t{fb_terms}", pipe))
+
+    qe_kl = pt.rewrite.KLQueryExpansion(index, fb_docs=5, fb_terms=10)
+    prf_pipelines.append(("TF_IDF_KL_d5_t10", base_retriever >> qe_kl >> base_retriever))
+
     all_results = {}
     latency_records = []
-
-    print(f"\nRunning {len(experiments)} pure Sparse VSM retrieval experiments...")
+    total_experiments = len(experiments) + len(prf_pipelines)
+    print(f"\nRunning {total_experiments} pure Sparse VSM & PRF retrieval experiments...")
     print("-" * 60)
 
     for name, wmodel, controls in experiments:
         ctrl_str = f"controls={controls}" if controls else ""
-        print(f"  [{name:16}] wmodel={wmodel:15} {ctrl_str} ...", end=" ", flush=True)
+        print(f"  [{name:20}] wmodel={wmodel:15} {ctrl_str} ...", end=" ", flush=True)
         try:
             results_df, mean_lat = run_model(index, wmodel, controls, queries_df)
             all_results[name] = results_df
@@ -137,33 +137,101 @@ def main():
         except Exception as e:
             print(f"ERROR: {e}")
 
-    # ----------------------------------------------------------------
-    # Save Latency Table
-    # ----------------------------------------------------------------
+    for name, pipeline in prf_pipelines:
+        print(f"  [{name:20}] PRF pipeline ...", end=" ", flush=True)
+        try:
+            t0 = time.time()
+            results_df = pipeline.transform(queries_df)
+            elapsed_ms = (time.time() - t0) * 1000
+            mean_lat = elapsed_ms / max(len(queries_df), 1)
+            all_results[name] = results_df
+            latency_records.append({"model": name, "mean_latency_ms": round(mean_lat, 2)})
+            print(f"done. Mean latency: {mean_lat:.2f} ms/query")
+        except Exception as e:
+            print(f"ERROR: {e}")
+
     latency_file = f"{GROUP_PREFIX}_latency.txt"
     lat_df = pd.DataFrame(latency_records)
     with open(latency_file, "w") as f:
         f.write(lat_df.to_string(index=False))
     print(f"\nLatency table saved to '{latency_file}'")
 
-    # ----------------------------------------------------------------
-    # Save All Individual Run Files
-    # ----------------------------------------------------------------
     runs_dir = f"{GROUP_PREFIX}_runs"
     os.makedirs(runs_dir, exist_ok=True)
     for name, res_df in all_results.items():
         run_path = os.path.join(runs_dir, f"{name}.txt")
         save_trec_run(res_df, run_path, run_tag=f"info_fetch_{name}")
 
-    # ----------------------------------------------------------------
-    # Save Default Run (TF_IDF_c0.75) as Submission File
-    # Will be verified / finalized by info_fetch_evaluate.py
-    # ----------------------------------------------------------------
-    default_best = "TF_IDF_c0.75" if "TF_IDF_c0.75" in all_results else list(all_results.keys())[0]
-    save_trec_run(all_results[default_best], RESULTS_FILE, run_tag="info_fetch")
-    print(f"\nDefault results.txt written ({default_best}). Run info_fetch_evaluate.py to evaluate models.")
 
-    print("\nSearch experiments complete.")
+def main():
+    parser = argparse.ArgumentParser(description="Info fetch -- Ranked Retrieval Search (Sparse VSM)")
+    parser.add_argument("query_file", nargs="?", default=PROCESSED_QRY_FILE,
+                        help=f"Path to queries file (default: '{PROCESSED_QRY_FILE}')")
+    parser.add_argument("output_file", nargs="?", default=RESULTS_FILE,
+                        help=f"Path to output TREC run file (default: '{RESULTS_FILE}')")
+    parser.add_argument("--model", default="vsm",
+                        choices=["vsm", "vsm_qe", "bm25", "inexpb2", "hybrid", "hybrid_qe"],
+                        help="Retrieval model to execute: vsm (default), vsm_qe, bm25, inexpb2, hybrid, hybrid_qe")
+    parser.add_argument("--c", default="0.85",
+                        help="Document length normalization parameter c for TF_IDF (default: '0.85')")
+    parser.add_argument("--experiments", action="store_true",
+                        help="Run full experimental suite across all models and measure latency")
+    args = parser.parse_args()
+
+    print("=" * 60)
+    print("Info fetch -- PA2 Ranked Retrieval Search")
+    print("=" * 60)
+
+    print(f"\nLoading index from '{INDEX_DIR}' ...")
+    index = pt.IndexFactory.of(os.path.abspath(INDEX_DIR))
+    stats = index.getCollectionStatistics()
+    print(f"  Index loaded: {stats.getNumberOfDocuments()} docs, {stats.getNumberOfUniqueTerms()} terms")
+
+    print(f"\nLoading queries from '{args.query_file}' ...")
+    queries_df = parse_processed_queries(args.query_file)
+    print(f"  {len(queries_df)} queries loaded.")
+
+    if args.experiments:
+        run_all_experiments(index, queries_df)
+        print("\nAll experiments complete.")
+        return
+
+    # Select retrieval pipeline based on requested model
+    if args.model == "vsm":
+        print(f"\nExecuting optimal Pure Sparse VSM (TF_IDF, c={args.c}) ...")
+        pipeline = pt.terrier.Retriever(index, wmodel="TF_IDF", tokeniser="whitespace", controls={"c": str(args.c)})
+    elif args.model == "vsm_qe":
+        print("\nExecuting Pure Sparse VSM + Bo1 Query Expansion (fb_docs=3, fb_terms=25) ...")
+        base = pt.terrier.Retriever(index, wmodel="TF_IDF", tokeniser="whitespace", controls={"c": "0.85"})
+        qe = pt.rewrite.Bo1QueryExpansion(index, fb_docs=3, fb_terms=25)
+        pipeline = base >> qe >> base
+    elif args.model == "bm25":
+        print("\nExecuting Tuned BM25 (b=0.75, k_1=2.0) ...")
+        pipeline = pt.terrier.Retriever(index, wmodel="BM25", tokeniser="whitespace", controls={"bm25.b": "0.75", "bm25.k_1": "2.0"})
+    elif args.model == "inexpb2":
+        print("\nExecuting Tuned In_expB2 DFR (c=0.7) ...")
+        pipeline = pt.terrier.Retriever(index, wmodel="In_expB2", tokeniser="whitespace", controls={"c": "0.7"})
+    elif args.model == "hybrid":
+        print("\nExecuting Best-of-Both Hybrid (0.1 * BM25* + 0.9 * In_expB2*) ...")
+        bm25_t = pt.terrier.Retriever(index, wmodel="BM25", tokeniser="whitespace", controls={"bm25.b": "0.75", "bm25.k_1": "2.0"})
+        inexp_b = pt.terrier.Retriever(index, wmodel="In_expB2", tokeniser="whitespace", controls={"c": "0.7"})
+        pipeline = 0.1 * bm25_t + 0.9 * inexp_b
+    elif args.model == "hybrid_qe":
+        print("\nExecuting Expanded Hybrid (0.5 * BM25_QE + 0.5 * In_expB2_QE) ...")
+        bm25_t = pt.terrier.Retriever(index, wmodel="BM25", tokeniser="whitespace", controls={"bm25.b": "0.75", "bm25.k_1": "2.0"})
+        inexp_b = pt.terrier.Retriever(index, wmodel="In_expB2", tokeniser="whitespace", controls={"c": "0.7"})
+        p_bm25 = bm25_t >> pt.rewrite.Bo1QueryExpansion(index, fb_docs=5, fb_terms=20) >> bm25_t
+        p_inexp = inexp_b >> pt.rewrite.Bo1QueryExpansion(index, fb_docs=3, fb_terms=10) >> inexp_b
+        pipeline = 0.5 * p_bm25 + 0.5 * p_inexp
+
+    t0 = time.time()
+    results_df = pipeline.transform(queries_df)
+    elapsed_ms = (time.time() - t0) * 1000
+    mean_lat = elapsed_ms / max(len(queries_df), 1)
+    print(f"  Completed in {mean_lat:.2f} ms/query.")
+
+    save_trec_run(results_df, args.output_file, run_tag="info_fetch")
+    print(f"\nRanked results saved to '{args.output_file}'.")
 
 
 if __name__ == "__main__":

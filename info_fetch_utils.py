@@ -22,8 +22,6 @@ def load_stopwords(filepath: str) -> set:
         return {line.strip().lower() for line in f if line.strip()}
 
 
-# Four preprocessing functions (assignment requirement)
-
 def tokenize(text: str) -> list:
     """Step 1 - extract alphabetic runs; discard digits and punctuation."""
     return re.findall(r"[a-zA-Z]+", text)
@@ -40,11 +38,9 @@ def remove_stopwords(tokens: list, stopwords: set) -> list:
 
 
 def stem_tokens(tokens: list) -> list:
-    """Step 4 - reduce inflected forms to a common root via Porter stemmer."""
+    """Reduce inflected forms to a common root via Porter stemmer."""
     return [_stemmer.stem(t) for t in tokens]
 
-
-# Pipeline wrappers
 
 def preprocess(text: str, stopwords: set) -> list:
     """Run the full four-step pipeline on a raw text string."""

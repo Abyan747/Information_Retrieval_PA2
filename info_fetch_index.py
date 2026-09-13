@@ -21,7 +21,6 @@ import os
 import time
 import shutil
 
-# Set JAVA_HOME and group configuration
 from config import PROCESSED_FILE, INDEX_DIR, GROUP_PREFIX
 
 import pyterrier as pt

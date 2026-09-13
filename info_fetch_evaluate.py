@@ -67,11 +67,9 @@ def main():
     print("Info fetch -- PA2 Evaluation (Modern PyTerrier)")
     print("=" * 60)
 
-    # Load index
     print(f"\nLoading index from '{INDEX_DIR}' ...")
     index = pt.IndexFactory.of(os.path.abspath(INDEX_DIR))
 
-    # Load queries and qrels
     print(f"Loading queries from '{PROCESSED_QRY_FILE}' ...")
     queries_df = parse_processed_queries(PROCESSED_QRY_FILE)
     print(f"  {len(queries_df)} queries loaded.")
@@ -80,9 +78,6 @@ def main():
     qrels_df = parse_qrels(REL_FILE)
     print(f"  {len(qrels_df)} relevance judgments, {qrels_df['qid'].nunique()} queries with judgments")
 
-    # ----------------------------------------------------------------
-    # Define All Sparse Vector Space Model Pipelines
-    # ----------------------------------------------------------------
     def make_vsm_retriever(wmodel: str, controls: dict = None):
         return pt.terrier.Retriever(
             index,
@@ -95,27 +90,21 @@ def main():
     pipelines = []
     names = []
 
-    # 1. TF_IDF document length normalization parameter sweep (c)
-    for c_val in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 1.0, 1.5, 2.0]:
+    # Fine-grained sweep between 0.75 and 0.90 to locate optimal retrieval performance on Cranfield
+    for c_val in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.78, 0.8, 0.82, 0.85, 0.88, 0.9, 1.0, 1.5, 2.0]:
         names.append(f"TF_IDF_c{c_val}")
         pipelines.append(make_vsm_retriever("TF_IDF", {"c": str(c_val)}))
 
-    # 2. Raw Term Frequency baseline
     names.append("Tf")
     pipelines.append(make_vsm_retriever("Tf"))
 
-    # 3. Coordinate Match baseline
     names.append("CoordinateMatch")
     pipelines.append(make_vsm_retriever("CoordinateMatch"))
 
-    # 4. Lemur TF-IDF Vector Space formulation
     names.append("LemurTF_IDF")
     pipelines.append(make_vsm_retriever("LemurTF_IDF"))
 
-    # ----------------------------------------------------------------
-    # Run pt.Experiment with filter_by_qrels=True
-    # Baseline set to TF_IDF_c0.75 (standard default) for significance testing
-    # ----------------------------------------------------------------
+    # Baseline set to standard default c=0.75 for paired significance tests
     baseline_idx = names.index("TF_IDF_c0.75")
     print(f"\nRunning pt.Experiment() with {len(pipelines)} pure Sparse VSM pipelines ...")
     print(f"  Baseline for significance tests: '{names[baseline_idx]}'")
@@ -132,9 +121,6 @@ def main():
         filter_by_qrels=True,
     )
 
-    # ----------------------------------------------------------------
-    # Display and Save Results Table
-    # ----------------------------------------------------------------
     print(f"\n{'=' * 60}")
     print("EVALUATION RESULTS")
     print(f"{'=' * 60}")
@@ -144,25 +130,20 @@ def main():
     results_table.to_csv(table_file, index=False)
     print(f"\nFull results table saved to '{table_file}'")
 
-    # ----------------------------------------------------------------
-    # Determine Best Model Dynamically (handle "MAP" vs "AP" column name)
-    # ----------------------------------------------------------------
+    # ir_measures versions alternate between MAP and AP column names
     map_col = "MAP" if "MAP" in results_table.columns else "AP"
     best_row = results_table.loc[results_table[map_col].idxmax()]
     best_name = best_row["name"]
     best_map = best_row[map_col]
     print(f"\nBest Sparse VSM Model: {best_name}  (MAP = {best_map:.4f})")
 
-    # Re-run best model on all queries to generate official submission run
+    # Generate official submission run using the peak model
     print(f"\nGenerating submission results for best model '{best_name}' on all {len(queries_df)} queries ...")
     best_retriever = pipelines[names.index(best_name)]
     submission_results = best_retriever.transform(queries_df)
     save_trec_run(submission_results, RESULTS_FILE, run_tag="info_fetch")
     print(f"Best model results saved to '{RESULTS_FILE}' (submission file).")
 
-    # ----------------------------------------------------------------
-    # Summary for Report
-    # ----------------------------------------------------------------
     print(f"\n{'=' * 60}")
     print("Summary for Report")
     print(f"{'=' * 60}")

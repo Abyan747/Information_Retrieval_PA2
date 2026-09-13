@@ -1,15 +1,34 @@
-          model  mean_latency_ms
-    TF_IDF_c0.1            20.01
-    TF_IDF_c0.2            15.93
-    TF_IDF_c0.3            15.68
-    TF_IDF_c0.4            15.04
-    TF_IDF_c0.5            15.10
-    TF_IDF_c0.6            14.82
-   TF_IDF_c0.75            15.49
-    TF_IDF_c0.9            15.11
-    TF_IDF_c1.0            14.65
-    TF_IDF_c1.5            14.65
-    TF_IDF_c2.0            14.92
-             Tf            15.28
-CoordinateMatch            15.06
-    LemurTF_IDF            14.92
+             model  mean_latency_ms
+       TF_IDF_c0.1            23.17
+       TF_IDF_c0.2            17.25
+       TF_IDF_c0.3            17.22
+       TF_IDF_c0.4            16.13
+       TF_IDF_c0.5            15.42
+       TF_IDF_c0.6            14.78
+       TF_IDF_c0.7            17.05
+      TF_IDF_c0.75            14.29
+      TF_IDF_c0.78            14.13
+       TF_IDF_c0.8            14.67
+      TF_IDF_c0.82            14.23
+      TF_IDF_c0.85            16.15
+      TF_IDF_c0.88            15.34
+       TF_IDF_c0.9            17.08
+       TF_IDF_c1.0            15.27
+       TF_IDF_c1.5            14.41
+       TF_IDF_c2.0            14.80
+                Tf            15.82
+   CoordinateMatch            15.43
+       LemurTF_IDF            15.14
+  TF_IDF_Bo1_d3_t5            49.75
+ TF_IDF_Bo1_d3_t10            47.57
+ TF_IDF_Bo1_d3_t15            49.09
+ TF_IDF_Bo1_d3_t20            49.95
+  TF_IDF_Bo1_d5_t5            46.02
+ TF_IDF_Bo1_d5_t10            46.07
+ TF_IDF_Bo1_d5_t15            45.30
+ TF_IDF_Bo1_d5_t20            46.97
+ TF_IDF_Bo1_d10_t5            47.95
+TF_IDF_Bo1_d10_t10            46.38
+TF_IDF_Bo1_d10_t15            49.60
+TF_IDF_Bo1_d10_t20            48.33
+  TF_IDF_KL_d5_t10            51.04
