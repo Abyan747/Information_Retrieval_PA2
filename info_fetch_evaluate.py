@@ -1,8 +1,26 @@
 """
 info_fetch_evaluate.py
-Evaluates all retrieval model runs against Cranfield relevance judgments.
-Uses pt.Experiment() to compute MAP, NDCG@10, P@5, P@10, Recall@100.
-Identifies the best model and overwrites info_fetch_results.txt with it.
+Evaluates all Sparse Vector Space Model retrieval pipelines against Cranfield
+relevance judgments (cranqrel) using modern PyTerrier.
+
+Complies strictly with PA2 requirements:
+    "You may use only sparse vector space models. Don't use advanced probabilistic
+     or dense neural retrieval models."
+
+Evaluates:
+  - MAP, NDCG@10, P@5, P@10, Recall@100
+  - Paired statistical significance tests (p-values) against baseline
+
+Modern PyTerrier optimizations:
+  - Uses pt.terrier.Retriever() (replaces deprecated pt.BatchRetrieve)
+  - tokeniser="whitespace"
+  - filter_by_qrels=True natively in pt.Experiment()
+  - Dynamic MAP / AP column detection (avoids KeyError across ir_measures versions)
+  - Vectorized pt.io.write_results() for submission file generation
+
+Outputs:
+  - info_fetch_eval_results.txt : Full evaluation table with metrics & p-values
+  - info_fetch_results.txt      : TREC-format ranked results for the best model
 
 Usage:
     python info_fetch_evaluate.py
@@ -10,9 +28,6 @@ Usage:
 
 import os
 import pandas as pd
-import pyterrier as pt
-import ir_measures
-from ir_measures import MAP
 
 from config import (
     REL_FILE, PROCESSED_QRY_FILE, INDEX_DIR,
@@ -20,13 +35,19 @@ from config import (
 )
 from info_fetch_search import parse_processed_queries, save_trec_run
 
+import pyterrier as pt
+if not pt.java.started():
+    pt.java.init()
+import ir_measures
+from ir_measures import MAP
+
 
 def parse_qrels(filepath: str) -> pd.DataFrame:
     """
     Parse Cranfield relevance judgments (cranqrel).
-    Format: qid docno rel (space-separated, rel in 1-4)
-    Returns DataFrame with columns: qid (str), docno (str), label (int)
-    Relevance: 1-4 all treated as relevant (>=1). Negatives excluded.
+    Format: qid docno rel (space-separated, rel in 1-4).
+    Relevance: 1-4 all treated as relevant (>=1). Negative scores excluded.
+    Returns DataFrame with columns: qid (str), docno (str), label (int).
     """
     rows = []
     with open(filepath, encoding="utf-8") as f:
@@ -36,14 +57,14 @@ def parse_qrels(filepath: str) -> pd.DataFrame:
                 qid = str(int(parts[0]))
                 docno = str(int(parts[1]))
                 rel = int(parts[2])
-                if rel >= 1:   # all 1-4 are relevant
+                if rel >= 1:
                     rows.append({"qid": qid, "docno": docno, "label": rel})
     return pd.DataFrame(rows)
 
 
 def main():
     print("=" * 60)
-    print("Info fetch -- PA2 Evaluation")
+    print("Info fetch -- PA2 Evaluation (Modern PyTerrier)")
     print("=" * 60)
 
     # Load index
@@ -53,64 +74,66 @@ def main():
     # Load queries and qrels
     print(f"Loading queries from '{PROCESSED_QRY_FILE}' ...")
     queries_df = parse_processed_queries(PROCESSED_QRY_FILE)
+    print(f"  {len(queries_df)} queries loaded.")
 
     print(f"Loading relevance judgments from '{REL_FILE}' ...")
     qrels_df = parse_qrels(REL_FILE)
-    print(f"  {len(qrels_df)} relevance judgments, "
-          f"{qrels_df['qid'].nunique()} queries with judgments")
-
-    # Keep only queries that have relevance judgments
-    valid_qids = set(qrels_df["qid"].unique())
-    queries_df = queries_df[queries_df["qid"].isin(valid_qids)].reset_index(drop=True)
-    print(f"  Using {len(queries_df)} queries that have relevance judgments")
+    print(f"  {len(qrels_df)} relevance judgments, {qrels_df['qid'].nunique()} queries with judgments")
 
     # ----------------------------------------------------------------
-    # Define all pipelines
+    # Define All Sparse Vector Space Model Pipelines
     # ----------------------------------------------------------------
-    def make_retriever(wmodel, controls=None):
-        return pt.BatchRetrieve(
+    def make_vsm_retriever(wmodel: str, controls: dict = None):
+        return pt.terrier.Retriever(
             index,
             wmodel=wmodel,
+            tokeniser="whitespace",
             num_results=1000,
             controls=controls or {},
         )
 
-    pipelines = [
-        ("TF_IDF",       make_retriever("TF_IDF")),
-        ("BM25_b0.1",    make_retriever("BM25", {"bm25.b": 0.1,  "bm25.k_1": 1.2})),
-        ("BM25_b0.3",    make_retriever("BM25", {"bm25.b": 0.3,  "bm25.k_1": 1.2})),
-        ("BM25_b0.5",    make_retriever("BM25", {"bm25.b": 0.5,  "bm25.k_1": 1.2})),
-        ("BM25_b0.75",   make_retriever("BM25", {"bm25.b": 0.75, "bm25.k_1": 1.2})),
-        ("BM25_b0.9",    make_retriever("BM25", {"bm25.b": 0.9,  "bm25.k_1": 1.2})),
-        ("PL2_c0.1",     make_retriever("PL2",  {"c": 0.1})),
-        ("PL2_c0.3",     make_retriever("PL2",  {"c": 0.3})),
-        ("PL2_c0.5",     make_retriever("PL2",  {"c": 0.5})),
-        ("PL2_c0.75",    make_retriever("PL2",  {"c": 0.75})),
-        ("PL2_c1.0",     make_retriever("PL2",  {"c": 1.0})),
-        ("In_expB2",     make_retriever("In_expB2")),
-    ]
+    pipelines = []
+    names = []
 
-    names      = [p[0] for p in pipelines]
-    retrievers = [p[1] for p in pipelines]
+    # 1. TF_IDF document length normalization parameter sweep (c)
+    for c_val in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 1.0, 1.5, 2.0]:
+        names.append(f"TF_IDF_c{c_val}")
+        pipelines.append(make_vsm_retriever("TF_IDF", {"c": str(c_val)}))
+
+    # 2. Raw Term Frequency baseline
+    names.append("Tf")
+    pipelines.append(make_vsm_retriever("Tf"))
+
+    # 3. Coordinate Match baseline
+    names.append("CoordinateMatch")
+    pipelines.append(make_vsm_retriever("CoordinateMatch"))
+
+    # 4. Lemur TF-IDF Vector Space formulation
+    names.append("LemurTF_IDF")
+    pipelines.append(make_vsm_retriever("LemurTF_IDF"))
 
     # ----------------------------------------------------------------
-    # Run pt.Experiment
+    # Run pt.Experiment with filter_by_qrels=True
+    # Baseline set to TF_IDF_c0.75 (standard default) for significance testing
     # ----------------------------------------------------------------
-    print(f"\nRunning pt.Experiment() with {len(pipelines)} models ...")
+    baseline_idx = names.index("TF_IDF_c0.75")
+    print(f"\nRunning pt.Experiment() with {len(pipelines)} pure Sparse VSM pipelines ...")
+    print(f"  Baseline for significance tests: '{names[baseline_idx]}'")
 
     eval_metrics = [MAP, ir_measures.nDCG@10, ir_measures.P@5, ir_measures.P@10, ir_measures.R@100]
 
     results_table = pt.Experiment(
-        retrievers,
+        pipelines,
         queries_df,
         qrels_df,
         eval_metrics=eval_metrics,
         names=names,
-        baseline=0,          # compare everything to TF_IDF
+        baseline=baseline_idx,
+        filter_by_qrels=True,
     )
 
     # ----------------------------------------------------------------
-    # Display and save results table
+    # Display and Save Results Table
     # ----------------------------------------------------------------
     print(f"\n{'=' * 60}")
     print("EVALUATION RESULTS")
@@ -122,25 +145,28 @@ def main():
     print(f"\nFull results table saved to '{table_file}'")
 
     # ----------------------------------------------------------------
-    # Pick best model by MAP
+    # Determine Best Model Dynamically (handle "MAP" vs "AP" column name)
     # ----------------------------------------------------------------
-    best_row = results_table.loc[results_table["AP"].idxmax()]
+    map_col = "MAP" if "MAP" in results_table.columns else "AP"
+    best_row = results_table.loc[results_table[map_col].idxmax()]
     best_name = best_row["name"]
-    best_map  = best_row["AP"]
-    print(f"\nBest model: {best_name}  (MAP = {best_map:.4f})")
+    best_map = best_row[map_col]
+    print(f"\nBest Sparse VSM Model: {best_name}  (MAP = {best_map:.4f})")
 
-    # Generate submission run for best model on all 225 queries
-    print(f"\nRe-running best model '{best_name}' on all {len(queries_df)} queries for submission ...")
-    best_idx = names.index(best_name)
-    best_retriever = retrievers[best_idx]
+    # Re-run best model on all queries to generate official submission run
+    print(f"\nGenerating submission results for best model '{best_name}' on all {len(queries_df)} queries ...")
+    best_retriever = pipelines[names.index(best_name)]
     submission_results = best_retriever.transform(queries_df)
     save_trec_run(submission_results, RESULTS_FILE, run_tag="info_fetch")
     print(f"Best model results saved to '{RESULTS_FILE}' (submission file).")
 
+    # ----------------------------------------------------------------
+    # Summary for Report
+    # ----------------------------------------------------------------
     print(f"\n{'=' * 60}")
     print("Summary for Report")
     print(f"{'=' * 60}")
-    summary_cols = ["name", "AP", "nDCG@10", "P@5", "P@10", "R@100"]
+    summary_cols = ["name", map_col, "nDCG@10", "P@5", "P@10", "R@100"]
     existing_cols = [c for c in summary_cols if c in results_table.columns]
     print(results_table[existing_cols].to_string(index=False))
 

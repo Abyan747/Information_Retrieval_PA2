@@ -1,13 +1,15 @@
-     model  mean_latency_ms
-    TF_IDF            32.65
- BM25_b0.1            27.34
- BM25_b0.3            26.18
- BM25_b0.5            26.60
-BM25_b0.75            25.53
- BM25_b0.9            26.12
-  PL2_c0.1            26.65
-  PL2_c0.3            25.73
-  PL2_c0.5            26.29
- PL2_c0.75            26.48
-  PL2_c1.0            26.45
-  In_expB2            26.76
+          model  mean_latency_ms
+    TF_IDF_c0.1            20.01
+    TF_IDF_c0.2            15.93
+    TF_IDF_c0.3            15.68
+    TF_IDF_c0.4            15.04
+    TF_IDF_c0.5            15.10
+    TF_IDF_c0.6            14.82
+   TF_IDF_c0.75            15.49
+    TF_IDF_c0.9            15.11
+    TF_IDF_c1.0            14.65
+    TF_IDF_c1.5            14.65
+    TF_IDF_c2.0            14.92
+             Tf            15.28
+CoordinateMatch            15.06
+    LemurTF_IDF            14.92

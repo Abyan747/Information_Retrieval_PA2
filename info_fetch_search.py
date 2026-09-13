@@ -1,18 +1,26 @@
 """
 info_fetch_search.py
 Runs ranked retrieval experiments on the Cranfield collection using PyTerrier.
-Experiments with multiple sparse VSM weighting models and parameter sweeps.
+Complies strictly with PA2 requirements:
+    "You may use only sparse vector space models. Don't use advanced probabilistic
+     or dense neural retrieval models."
 
-Models tested:
-  - TF_IDF  (classic TF-IDF cosine similarity)
-  - BM25    (b sweep 0.1-0.9)
-  - PL2     (c sweep 0.1-0.9)
-  - In_expB2 (DFR variant)
-  - DLH     (DFR hypergeometric)
+Sparse Vector Space Models & Parameter Sweeps Tested:
+  1. TF_IDF (Classic Salton/Robertson VSM with length normalization parameter c):
+     - Sweeping c across [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 1.0, 1.5, 2.0]
+  2. Tf (Raw Term Frequency baseline, no IDF, no length normalization)
+  3. CoordinateMatch (Coordinate matching baseline, count of matching query terms)
+  4. LemurTF_IDF (Lemur Vector Space TF-IDF formulation)
+
+Modern PyTerrier optimizations:
+  - Uses pt.terrier.Retriever() (replaces deprecated pt.BatchRetrieve)
+  - tokeniser="whitespace" (preserves preprocessed stems)
+  - Uses vectorized pt.io.write_results() (replaces manual iterrows() loops)
 
 Outputs:
-  - info_fetch_results.txt  : TREC-format ranked results for best model
-  - info_fetch_latency.txt  : per-model mean query latency
+  - info_fetch_results.txt : TREC-format ranked results for default/best model
+  - info_fetch_latency.txt : Per-model mean query latency in ms
+  - info_fetch_runs/*.txt  : TREC-format runs for all individual models
 
 Usage:
     python info_fetch_search.py
@@ -23,7 +31,10 @@ import time
 import pandas as pd
 
 from config import PROCESSED_QRY_FILE, INDEX_DIR, RESULTS_FILE, GROUP_PREFIX
+
 import pyterrier as pt
+if not pt.java.started():
+    pt.java.init()
 
 
 def parse_processed_queries(filepath: str) -> pd.DataFrame:
@@ -32,7 +43,8 @@ def parse_processed_queries(filepath: str) -> pd.DataFrame:
     Expected format:
         .I <qid>
         .W <stem1> <stem2> ...
-    Returns DataFrame with columns: qid (str), query (str)
+    Returns DataFrame with columns: qid (str), query (str).
+    Queries are indexed 1..225 sequentially to match cranqrel.
     """
     rows = []
     qid = None
@@ -40,7 +52,6 @@ def parse_processed_queries(filepath: str) -> pd.DataFrame:
         for line in f:
             line = line.rstrip("\r\n")
             if line.startswith(".I "):
-                # Cranfield relevance judgments (cranqrel) index queries 1..225 sequentially
                 qid = str(len(rows) + 1)
             elif line.startswith(".W ") and qid is not None:
                 query = line[3:].strip()
@@ -51,38 +62,37 @@ def parse_processed_queries(filepath: str) -> pd.DataFrame:
 
 
 def save_trec_run(results_df: pd.DataFrame, filepath: str, run_tag: str = "info_fetch"):
-    """Write results to TREC run file format."""
-    with open(filepath, "w") as f:
-        for _, row in results_df.iterrows():
-            f.write(f"{row['qid']} Q0 {row['docno']} {int(row['rank'])} {row['score']:.6f} {run_tag}\n")
+    """Write results to TREC run format using modern vectorized pt.io.write_results."""
+    pt.io.write_results(results_df, filepath, run_name=run_tag)
     print(f"  Saved TREC run to '{filepath}' ({len(results_df)} rows)")
 
 
-def run_model(index, wmodel, controls, queries_df, num_results=1000):
-    """Run a single retrieval model, return (results_df, mean_latency_ms)."""
-    retriever = pt.BatchRetrieve(
+def run_model(index, wmodel: str, controls: dict, queries_df: pd.DataFrame, num_results: int = 1000):
+    """Run a single retrieval model using modern pt.terrier.Retriever, return (results_df, mean_latency_ms)."""
+    retriever = pt.terrier.Retriever(
         index,
         wmodel=wmodel,
+        tokeniser="whitespace",
         num_results=num_results,
-        controls=controls,
+        controls=controls or {},
     )
     t0 = time.time()
     results = retriever.transform(queries_df)
     elapsed_ms = (time.time() - t0) * 1000
-    mean_latency = elapsed_ms / len(queries_df)
+    mean_latency = elapsed_ms / max(len(queries_df), 1)
     return results, mean_latency
 
 
 def main():
     print("=" * 60)
-    print("Info fetch -- PA2 Search & Retrieval Experiments")
+    print("Info fetch -- PA2 Sparse Vector Space Model Experiments")
     print("=" * 60)
 
     # Load index
     print(f"\nLoading index from '{INDEX_DIR}' ...")
     index = pt.IndexFactory.of(os.path.abspath(INDEX_DIR))
-    print(f"  Index loaded: {index.getCollectionStatistics().getNumberOfDocuments()} docs, "
-          f"{index.getCollectionStatistics().getNumberOfUniqueTerms()} terms")
+    stats = index.getCollectionStatistics()
+    print(f"  Index loaded: {stats.getNumberOfDocuments()} docs, {stats.getNumberOfUniqueTerms()} terms")
 
     # Load queries
     print(f"\nLoading queries from '{PROCESSED_QRY_FILE}' ...")
@@ -90,45 +100,45 @@ def main():
     print(f"  {len(queries_df)} queries loaded.")
 
     # ----------------------------------------------------------------
-    # Define all experiments
+    # Define Sparse Vector Space Model Experiments
     # ----------------------------------------------------------------
     experiments = []
 
-    # 1. Baseline TF_IDF
-    experiments.append(("TF_IDF", "TF_IDF", {}))
+    # 1. TF_IDF document length normalization parameter sweep (c)
+    for c_val in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 1.0, 1.5, 2.0]:
+        experiments.append((f"TF_IDF_c{c_val}", "TF_IDF", {"c": str(c_val)}))
 
-    # 2. BM25 b sweep
-    for b in [0.1, 0.3, 0.5, 0.75, 0.9]:
-        experiments.append((f"BM25_b{b}", "BM25", {"bm25.b": b, "bm25.k_1": 1.2, "bm25.k_3": 8}))
+    # 2. Raw Term Frequency baseline (no IDF, no normalization)
+    experiments.append(("Tf", "Tf", {}))
 
-    # 3. PL2 c sweep
-    for c in [0.1, 0.3, 0.5, 0.75, 1.0]:
-        experiments.append((f"PL2_c{c}", "PL2", {"c": c}))
+    # 3. Coordinate Matching baseline (term overlap count)
+    experiments.append(("CoordinateMatch", "CoordinateMatch", {}))
 
-    # 4. Other DFR models
-    experiments.append(("In_expB2", "In_expB2", {}))
+    # 4. Lemur TF-IDF Vector Space formulation
+    experiments.append(("LemurTF_IDF", "LemurTF_IDF", {}))
 
     # ----------------------------------------------------------------
-    # Run all experiments
+    # Execute All Experiments
     # ----------------------------------------------------------------
     all_results = {}
     latency_records = []
 
-    print(f"\nRunning {len(experiments)} retrieval experiments...")
+    print(f"\nRunning {len(experiments)} pure Sparse VSM retrieval experiments...")
     print("-" * 60)
 
     for name, wmodel, controls in experiments:
-        print(f"  [{name}] wmodel={wmodel}, controls={controls} ...", end=" ", flush=True)
+        ctrl_str = f"controls={controls}" if controls else ""
+        print(f"  [{name:16}] wmodel={wmodel:15} {ctrl_str} ...", end=" ", flush=True)
         try:
             results_df, mean_lat = run_model(index, wmodel, controls, queries_df)
             all_results[name] = results_df
             latency_records.append({"model": name, "mean_latency_ms": round(mean_lat, 2)})
-            print(f"done. Mean latency: {mean_lat:.1f} ms/query")
+            print(f"done. Mean latency: {mean_lat:.2f} ms/query")
         except Exception as e:
             print(f"ERROR: {e}")
 
     # ----------------------------------------------------------------
-    # Save latency table
+    # Save Latency Table
     # ----------------------------------------------------------------
     latency_file = f"{GROUP_PREFIX}_latency.txt"
     lat_df = pd.DataFrame(latency_records)
@@ -137,7 +147,7 @@ def main():
     print(f"\nLatency table saved to '{latency_file}'")
 
     # ----------------------------------------------------------------
-    # Save all individual run files (for evaluation)
+    # Save All Individual Run Files
     # ----------------------------------------------------------------
     runs_dir = f"{GROUP_PREFIX}_runs"
     os.makedirs(runs_dir, exist_ok=True)
@@ -146,14 +156,14 @@ def main():
         save_trec_run(res_df, run_path, run_tag=f"info_fetch_{name}")
 
     # ----------------------------------------------------------------
-    # Save default best run as info_fetch_results.txt (TF_IDF as default)
-    # Will be overwritten by evaluate.py with actual best model
+    # Save Default Run (TF_IDF_c0.75) as Submission File
+    # Will be verified / finalized by info_fetch_evaluate.py
     # ----------------------------------------------------------------
-    if "TF_IDF" in all_results:
-        save_trec_run(all_results["TF_IDF"], RESULTS_FILE, run_tag="info_fetch")
-        print(f"\nDefault results.txt written (TF_IDF). Run info_fetch_evaluate.py to pick best model.")
+    default_best = "TF_IDF_c0.75" if "TF_IDF_c0.75" in all_results else list(all_results.keys())[0]
+    save_trec_run(all_results[default_best], RESULTS_FILE, run_tag="info_fetch")
+    print(f"\nDefault results.txt written ({default_best}). Run info_fetch_evaluate.py to evaluate models.")
 
-    print("\nDone.")
+    print("\nSearch experiments complete.")
 
 
 if __name__ == "__main__":
