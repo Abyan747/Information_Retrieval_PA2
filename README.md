@@ -172,19 +172,19 @@ python info_fetch_evaluate_extended.py
 | `evaluate_query_expansion_with_VSM.py` | Evaluates Pseudo-Relevance Feedback (Bo1/KL) on the optimal pure VSM |
 | `info_fetch_evaluate_extended.py` | Evaluates advanced models: BM25, In_expB2, Hybrids, and Advanced PRF |
 | `info_fetch_results.txt` | **Primary Submission File:** Standard 6-column TREC run of the optimal pure VSM |
-| `report.tex` / `info_fetch_report_PA2.tex` | Complete 10-page LaTeX report source code |
+
 
 ---
 
 ## 6. Experimental Results Summary
 
-| Paradigm Tier | Optimal Model Configuration | MAP | nDCG@10 | P@5 | P@10 | Recall@100 | Assignment Compliance |
+| Paradigm Tier | Optimal Model Configuration | MAP | nDCG@10 | P@5 | P@10 | Recall@100 |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Part I: Pure Sparse VSM** | `TF_IDF_c0.85` | **0.3200** | **0.3486** | 0.3271 | 0.2364 | 0.7502 | ✅ **100% Strict VSM** |
-| **Part II: VSM + PRF** | `VSM_Bo1_d3_t25` | **0.3513** | **0.3789** | 0.3547 | 0.2716 | 0.7875 | ✅ Sparse PRF on VSM |
-| **Part III: Advanced Models** | `In_expB2_c0.7` | **0.3312** | **0.3645** | 0.3396 | 0.2573 | 0.7651 | ⚠️ DFR Probabilistic |
-| **Part III: Tuned BM25** | `BM25_b0.75_k1_2.0` | 0.3217 | 0.3522 | 0.3342 | 0.2462 | 0.7493 | ⚠️ BM25 Probabilistic |
-| **Part IV: Expanded Hybrid** | `Hybrid_Expanded_a0.5` | **0.3534** | 0.3793 | **0.3556** | 0.2693 | 0.7905 | ⚠️ Ensemble Fusion |
+| **Part I: Pure Sparse VSM** | `TF_IDF_c0.85` | **0.3200** | **0.3486** | 0.3271 | 0.2364 | 0.7502 |
+| **Part II: VSM + PRF** | `VSM_Bo1_d3_t25` | **0.3513** | **0.3789** | 0.3547 | 0.2716 | 0.7875 | 
+| **Part III: Advanced Models** | `In_expB2_c0.7` | **0.3312** | **0.3645** | 0.3396 | 0.2573 | 0.7651 | 
+| **Part III: Tuned BM25** | `BM25_b0.75_k1_2.0` | 0.3217 | 0.3522 | 0.3342 | 0.2462 | 0.7493 |
+| **Part IV: Expanded Hybrid** | `Hybrid_Expanded_a0.5` | **0.3534** | 0.3793 | **0.3556** | 0.2693 | 0.7905 |
 
 ---
 
