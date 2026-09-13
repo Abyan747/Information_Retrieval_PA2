@@ -9,8 +9,8 @@
 * **Group Name:** Info fetch
 * **Repository:** `https://github.com/sumitmukherjee7/info-fetch-assignment-2`
 * **Team Members:**
-  * **Sumit Mukherjee** — `23EC3AI17` (M.Tech, E&ECE)
-  * **Abyan Hussain** — `23EC3AI19` (M.Tech, E&ECE)
+  * **Sumit Mukherjee** — `23EC3AI17` (Dual Degree, E&ECE)
+  * **Abyan Hussain** — `23EC3AI19` (Dual Degree, E&ECE)
   * **Kinnar Halder** — `23IE35001` (Dual Degree, Industrial & Systems)
   * **Avik Ghosh** — `23EC10099` (B.Tech, E&ECE)
 
